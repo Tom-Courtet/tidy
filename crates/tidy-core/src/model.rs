@@ -362,7 +362,72 @@ impl Versioned for DesktopState {
     const FILE_NAME: &'static str = "desktop.json";
 }
 
+/// Modification de l'état du bureau demandée par un autre processus.
+///
+/// **Un seul écrivain** : le processus du bureau possède `desktop.json`. L'agent (règles,
+/// nouveaux fichiers) et la fenêtre principale (pages Boîtes, Rangement) lui envoient des
+/// commandes, relayées par l'agent (`Request::Desktop` → `Event::Desktop`). Si le bureau
+/// ne tourne pas, l'agent applique lui-même la commande au fichier, avec la même
+/// fonction [`DesktopState::apply`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DesktopCommand {
+    /// Ranger des éléments : `Some(boîte)` les place dans le premier onglet de la boîte
+    /// (en les retirant de toute autre), `None` les rend au bureau.
+    Assign {
+        items: Vec<(ItemRef, Option<BoxId>)>,
+    },
+    /// Éléments arrivés sans règle correspondante (bandeau « non affectées »).
+    SetUnassigned { items: Vec<ItemRef> },
+    /// Ajoute une boîte (ou la remplace si l'identifiant existe déjà).
+    UpsertBox { b: DeskBox },
+    /// Supprime une boîte ; ses éléments reviennent au bureau.
+    RemoveBox { id: BoxId },
+    /// Remplace les règles.
+    SetRules { rules: Vec<Rule> },
+    /// Remplace tout l'état (annuler un rangement, restaurer un instantané).
+    Replace { state: Box<DesktopState> },
+}
+
 impl DesktopState {
+    /// Applique une commande. Ne touche jamais aux fichiers.
+    pub fn apply(&mut self, command: DesktopCommand) {
+        match command {
+            DesktopCommand::Assign { items } => {
+                for (item, target) in items {
+                    for b in &mut self.boxes {
+                        for tab in &mut b.tabs {
+                            tab.items.retain(|i| i != &item);
+                        }
+                    }
+                    self.unassigned.retain(|i| i != &item);
+                    match target.and_then(|id| self.find_box_mut(id)) {
+                        Some(b) => {
+                            if b.tabs.is_empty() {
+                                b.tabs.push(Tab::new(String::new()));
+                            }
+                            b.tabs[0].items.push(item.clone());
+                            self.loose.remove(&item);
+                        }
+                        None => {
+                            self.loose.entry(item).or_default();
+                        }
+                    }
+                }
+            }
+            DesktopCommand::SetUnassigned { items } => self.unassigned = items,
+            DesktopCommand::UpsertBox { b } => match self.find_box_mut(b.id) {
+                Some(existing) => *existing = b,
+                None => self.boxes.push(b),
+            },
+            DesktopCommand::RemoveBox { id } => {
+                self.remove_box(id);
+            }
+            DesktopCommand::SetRules { rules } => self.rules = rules,
+            DesktopCommand::Replace { state } => *self = *state,
+        }
+    }
+
     pub fn find_box(&self, id: BoxId) -> Option<&DeskBox> {
         self.boxes.iter().find(|b| b.id == id)
     }
@@ -446,6 +511,37 @@ mod tests {
         assert_eq!(id, laptop.id);
         // Ramenée dans l'écran.
         assert_eq!(r.right(), 1512.0);
+    }
+
+    #[test]
+    fn assigning_moves_items_between_boxes_and_back() {
+        let mut state = DesktopState::default();
+        let a = DeskBox::new("A");
+        let b = DeskBox::new("B");
+        let (ida, idb) = (a.id, b.id);
+        state.boxes.extend([a, b]);
+        let item = ItemRef("photo.jpg".into());
+        state.apply(DesktopCommand::Assign {
+            items: vec![(item.clone(), Some(ida))],
+        });
+        assert_eq!(state.box_of(&item), Some(ida));
+        state.apply(DesktopCommand::Assign {
+            items: vec![(item.clone(), Some(idb))],
+        });
+        assert_eq!(state.box_of(&item), Some(idb));
+        assert!(!state.find_box(ida).unwrap().contains(&item));
+        state.apply(DesktopCommand::Assign {
+            items: vec![(item.clone(), None)],
+        });
+        assert_eq!(state.box_of(&item), None);
+        assert!(state.loose.contains_key(&item));
+    }
+
+    #[test]
+    fn commands_round_trip_in_json() {
+        let cmd = DesktopCommand::RemoveBox { id: BoxId::new() };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(serde_json::from_str::<DesktopCommand>(&json).unwrap(), cmd);
     }
 
     #[test]

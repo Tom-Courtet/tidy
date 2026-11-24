@@ -253,6 +253,12 @@ impl Desktop {
                     self.state = self.store.load();
                     self.sync_windows();
                 }
+                Event::Desktop { command } => {
+                    // Seul écrivain de `desktop.json` (voir `DesktopCommand`).
+                    self.state.apply(command);
+                    self.sync_windows();
+                    self.save_state();
+                }
                 _ => continue,
             }
             changed = true;

@@ -52,6 +52,18 @@ pub enum SurfaceLevel {
 /// Rappel appelé depuis le thread système (double-clic sur le bureau…).
 pub type Callback = Box<dyn Fn() + Send + Sync>;
 
+/// Rappel recevant un rectangle (coordonnées globales en points).
+pub type RectCallback = Box<dyn Fn(Rect) + Send + Sync>;
+
+/// Image RGBA (icône système, miniature).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconImage {
+    pub width: u32,
+    pub height: u32,
+    /// Pixels RGBA, non prémultipliés, ligne par ligne.
+    pub rgba: Vec<u8>,
+}
+
 /// Services système dont Tidy a besoin.
 pub trait DesktopPlatform: Send + Sync {
     /// Écrans branchés (voir les coordonnées en tête de crate).
@@ -92,6 +104,50 @@ pub trait DesktopPlatform: Send + Sync {
     fn desktop_icon_positions(&self) -> Option<&'static dyn tidy_core::icon_stash::DesktopIcons> {
         None
     }
+
+    // --- Vague 1, lot B (plateforme). Valeurs par défaut : « pas disponible ». ---
+
+    /// Icône système de l'élément (ou sa miniature si `thumbnail` et si le système en
+    /// fournit une), à `size_px` pixels de côté.
+    fn file_icon(&self, _path: &Path, _size_px: u32, _thumbnail: bool) -> Option<IconImage> {
+        None
+    }
+
+    /// Menu contextuel natif de ces éléments (Explorateur / Finder), sous la souris,
+    /// pour la fenêtre de titre `window_title`. `Ok(false)` : pas de menu natif ici,
+    /// l'appelant affiche le sien.
+    fn show_file_menu(&self, _window_title: &str, _paths: &[std::path::PathBuf]) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Commence un glisser-déposer système de ces fichiers depuis la fenêtre
+    /// `window_title` (vers l'Explorateur, le Finder, une autre appli). `Ok(false)` :
+    /// pas disponible.
+    fn start_file_drag(&self, _window_title: &str, _paths: &[std::path::PathBuf]) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Met des fichiers à la corbeille (jamais de suppression définitive).
+    fn trash(&self, _paths: &[std::path::PathBuf]) -> Result<()> {
+        anyhow::bail!("corbeille indisponible")
+    }
+
+    /// Prévient quand les écrans changent (branchement, résolution, échelle). À
+    /// appeler sur le thread principal. `false` : pas disponible.
+    fn watch_screens(&self, _on_change: Callback) -> bool {
+        false
+    }
+
+    /// Prévient quand l'utilisateur trace un rectangle de sélection sur une zone vide
+    /// du bureau du système (pour proposer « Créer une boîte »). À appeler sur le thread
+    /// principal. `false` : pas disponible.
+    fn watch_desktop_drag(&self, _on_rect: RectCallback) -> bool {
+        false
+    }
+
+    /// Accès rapide : passe la fenêtre `title` au-dessus des applis (`true`) ou la
+    /// remet au niveau du bureau (`false`).
+    fn raise_desktop_surface(&self, _title: &str, _raised: bool) {}
 
     /// Ouvre un fichier ou un dossier avec l'application par défaut.
     fn open(&self, path: &Path) -> Result<()>;

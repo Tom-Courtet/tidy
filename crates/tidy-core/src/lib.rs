@@ -11,11 +11,14 @@ pub mod geometry;
 pub mod icon_stash;
 pub mod model;
 pub mod rules;
+pub mod scan;
 pub mod screen;
 pub mod settings;
+pub mod snap;
+pub mod sort;
 pub mod store;
 
-pub use model::{BoxId, DeskBox, DesktopState};
+pub use model::{BoxId, DeskBox, DesktopCommand, DesktopState};
 pub use settings::Settings;
 pub use store::Store;
 

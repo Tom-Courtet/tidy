@@ -37,6 +37,14 @@ pub enum Event {
     SettingsChanged,
     /// `desktop.json` a changé : relire l'état du bureau.
     DesktopChanged,
+    /// Modification de l'état du bureau, à appliquer par le processus du bureau (seul
+    /// écrivain de `desktop.json`, voir [`crate::model::DesktopCommand`]).
+    Desktop {
+        command: crate::model::DesktopCommand,
+    },
+    /// Les fichiers du bureau ont changé (création, suppression, renommage) : le
+    /// processus du bureau relit le dossier.
+    DesktopFilesChanged,
     /// Une boîte a changé (position, contenu, apparence).
     BoxChanged {
         id: BoxId,

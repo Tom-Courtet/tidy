@@ -38,6 +38,18 @@ pub enum Request {
     ToggleDesktop,
     /// Créer une boîte sous la souris (menu du bureau, `tidy --create-box`).
     CreateBox,
+    /// Modifier l'état du bureau (seul le processus du bureau écrit `desktop.json` ;
+    /// l'agent relaie, ou applique lui-même si le bureau ne tourne pas).
+    Desktop {
+        command: tidy_core::DesktopCommand,
+    },
+    /// Appliquer les règles de rangement : à tous les éléments (`all`) ou seulement
+    /// aux non affectés.
+    ApplyRules {
+        all: bool,
+    },
+    /// Annuler le dernier rangement automatique (« Tout annuler »).
+    UndoOrganize,
     /// Rendre les icônes du Finder (bouton du diagnostic) : repasse en mode superposé.
     RestoreFinder,
     /// Le processus du bureau a posé ses surfaces : en mode géré, l'agent peut masquer

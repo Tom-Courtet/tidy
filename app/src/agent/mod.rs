@@ -10,6 +10,7 @@
 //! - **fil de surveillance** ([`supervisor`]) : processus du bureau, icônes du Finder.
 
 mod hotkeys;
+pub mod organizer;
 mod supervisor;
 mod tray;
 
@@ -100,6 +101,12 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     bus.publish(Event::CreateBox { at: None });
                     Ok(Response::Ok)
                 }
+                Request::Desktop { command } => {
+                    let running = shared.lock().is_ok_and(|s| s.desktop_running);
+                    Ok(organizer::route(&store, &bus, running, command))
+                }
+                Request::ApplyRules { all } => Ok(organizer::apply_rules(&store, &bus, all)),
+                Request::UndoOrganize => Ok(organizer::undo(&store, &bus)),
                 Request::RestoreFinder => send(UserEvent::RestoreFinder),
                 Request::DesktopReady => {
                     supervisor.send(Command::DesktopReady);
