@@ -35,6 +35,9 @@ Usage :
   tidy --desktop          surfaces du bureau (lancé par l'agent)
   tidy --create-box       crée une boîte sous la souris (menu du bureau)
   tidy --toggle-desktop   masque ou montre le bureau (boîtes et icônes)
+  tidy --organize         range tout le bureau selon les règles (démarrage rapide si
+                          aucune boîte) ; --organize-new : seulement les non affectés
+  tidy --undo-organize    annule le dernier rangement (« Tout annuler »)
   tidy --restore-desktop  rend les icônes du bureau si Tidy les a masquées
   tidy --desktop-icons    liste les icônes du bureau et leur position (Windows)
   tidy --hide-icon <nom>  essai : masque l'icône d'un élément du bureau (Windows)
@@ -53,6 +56,8 @@ enum Role {
     RestoreFinder,
     CreateBox,
     ToggleDesktop,
+    Organize { all: bool },
+    UndoOrganize,
     ListIcons,
     HideIcon,
     Uninstall,
@@ -70,6 +75,9 @@ fn parse_role(arg: Option<&str>) -> Option<Role> {
         Some("--restore-finder" | "--restore-desktop") => Role::RestoreFinder,
         Some("--create-box") => Role::CreateBox,
         Some("--toggle-desktop") => Role::ToggleDesktop,
+        Some("--organize") => Role::Organize { all: true },
+        Some("--organize-new") => Role::Organize { all: false },
+        Some("--undo-organize") => Role::UndoOrganize,
         Some("--desktop-icons") => Role::ListIcons,
         Some("--hide-icon") => Role::HideIcon,
         Some("--uninstall") => Role::Uninstall,
@@ -94,7 +102,7 @@ fn main() -> Result<()> {
                 // Relancé (Finder, Launchpad) alors qu'il tourne : on montre la fenêtre
                 // principale, sauf au démarrage de session.
                 if !background {
-                    let _ = ipc::request(&store, &Request::OpenManager);
+                    let _ = ipc::request(&store, &Request::OpenManager { page: None });
                 }
                 println!("Tidy tourne déjà (icône dans la barre des menus).");
                 return Ok(());
@@ -129,6 +137,8 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Role::Organize { all } => agent_request(&store, &Request::ApplyRules { all }),
+        Role::UndoOrganize => agent_request(&store, &Request::UndoOrganize),
         Role::ToggleDesktop => match ipc::request(&store, &Request::ToggleDesktop) {
             Ok(_) => Ok(()),
             Err(_) => {
@@ -216,6 +226,21 @@ fn main() -> Result<()> {
         Role::Help => {
             println!("{USAGE}");
             Ok(())
+        }
+    }
+}
+
+/// Requête à l'agent depuis la ligne de commande : message clair en cas d'erreur.
+fn agent_request(store: &Store, req: &Request) -> Result<()> {
+    match ipc::request(store, req) {
+        Ok(ipc::Response::Error { message }) => {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+        Ok(_) => Ok(()),
+        Err(_) => {
+            eprintln!("Tidy ne tourne pas : lance-le d'abord.");
+            std::process::exit(1);
         }
     }
 }

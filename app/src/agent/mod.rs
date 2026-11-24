@@ -35,11 +35,12 @@ use supervisor::{Command, Shared, Supervisor};
 use tray::{MenuChoice, Tray, TrayView};
 
 /// Événements de la boucle principale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum UserEvent {
     Menu(MenuChoice),
     Hotkey(Action, bool),
-    OpenManager,
+    /// Ouvrir la fenêtre principale, sur une page si donnée.
+    OpenManager(Option<String>),
     ReloadSettings,
     ToggleDesktop,
     RestoreFinder,
@@ -92,7 +93,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     ),
                     desktop_hidden: hidden.lock().is_ok_and(|h| *h),
                 })),
-                Request::OpenManager => send(UserEvent::OpenManager),
+                Request::OpenManager { page } => send(UserEvent::OpenManager(page)),
                 Request::ReloadSettings => send(UserEvent::ReloadSettings),
                 Request::ReloadDesktop => {
                     bus.publish(Event::DesktopChanged);
@@ -210,10 +211,10 @@ impl App {
         }
         let proxy = self.proxy.clone();
         tidy_platform::on_reopen(move || {
-            let _ = proxy.send_event(UserEvent::OpenManager);
+            let _ = proxy.send_event(UserEvent::OpenManager(None));
         });
         if self.open_manager_at_start {
-            self.open_manager();
+            self.open_manager(None);
         }
         log::info!("agent prêt (données : {})", self.store.root().display());
     }
@@ -249,18 +250,26 @@ impl App {
         }
     }
 
-    fn open_manager(&mut self) {
+    fn open_manager(&mut self, page: Option<String>) {
         if let Some(child) = &mut self.manager
             && matches!(child.try_wait(), Ok(None))
         {
             // Une fenêtre cachée derrière d'autres ne se redessine pas : c'est le
-            // système qui la ramène devant, pas un événement.
-            if !tidy_platform::activate_process(child.id()) {
-                self.bus.publish(Event::FocusManager);
-            }
+            // système qui la ramène devant ; l'événement change de page (il est traité
+            // même fenêtre cachée).
+            tidy_platform::activate_process(child.id());
+            self.bus.publish(Event::FocusManager { page });
             return;
         }
-        match std::env::current_exe().and_then(|exe| Process::new(exe).arg("--manager").spawn()) {
+        let spawned = std::env::current_exe().and_then(|exe| {
+            let mut cmd = Process::new(exe);
+            cmd.arg("--manager");
+            if let Some(page) = &page {
+                cmd.arg(page);
+            }
+            cmd.spawn()
+        });
+        match spawned {
             Ok(child) => self.manager = Some(child),
             Err(e) => log::error!("fenêtre principale impossible : {e}"),
         }
@@ -364,9 +373,8 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Menu(MenuChoice::OpenManager) | UserEvent::OpenManager => {
-                self.open_manager()
-            }
+            UserEvent::Menu(MenuChoice::OpenManager) => self.open_manager(None),
+            UserEvent::OpenManager(page) => self.open_manager(page),
             UserEvent::Menu(MenuChoice::ToggleBoxes) => {
                 let off = self.settings.desktop_mode != DesktopMode::Off;
                 self.save_settings(|s| {
@@ -391,7 +399,7 @@ impl ApplicationHandler<UserEvent> for App {
             }),
             UserEvent::Hotkey(action, down) => match action {
                 Action::ToggleDesktop if down => self.toggle_desktop(),
-                Action::MainWindow if down => self.open_manager(),
+                Action::MainWindow if down => self.open_manager(None),
                 Action::Search if down => self.bus.publish(Event::OpenSearch),
                 Action::QuickAccess => match self.settings.hotkeys.quick_access_mode {
                     QuickAccessMode::Hold => {

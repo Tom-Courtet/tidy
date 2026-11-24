@@ -367,10 +367,9 @@ impl Desktop {
         channels: Channels,
         with_agent: bool,
     ) -> Self {
-        let mut state: DesktopState = store.load();
-        if state.boxes.is_empty() {
-            state.boxes.push(DeskBox::new(t!("desktop.demo_box")));
-        }
+        // Pas de boîte de démonstration : les premières boîtes viennent de l'assistant
+        // (démarrage rapide) ou de l'utilisateur.
+        let state: DesktopState = store.load();
         let desktop_dir = desktop_dir();
         let desktop_watch = if with_agent {
             None
@@ -1415,16 +1414,30 @@ fn split_desktop_items(paths: &[PathBuf], desktop: Option<&Path>) -> (Vec<String
     (names, outside)
 }
 
-/// Ouvre la fenêtre principale à une page (`tidy --manager <page>`).
+/// Ouvre la fenêtre principale à une page, par l'agent : il ramène devant celle qui
+/// serait déjà ouverte au lieu d'en lancer une deuxième.
 fn open_manager(page: &str) {
-    let spawned = std::env::current_exe().and_then(|exe| {
-        std::process::Command::new(exe)
-            .args(["--manager", page])
-            .spawn()
+    let page = page.to_owned();
+    std::thread::spawn(move || {
+        let Ok(store) = Store::open_default() else {
+            return;
+        };
+        if ipc::request(
+            &store,
+            &Request::OpenManager {
+                page: Some(page.clone()),
+            },
+        )
+        .is_err()
+        {
+            // Sans agent : lancement direct.
+            let _ = std::env::current_exe().and_then(|exe| {
+                std::process::Command::new(exe)
+                    .args(["--manager", &page])
+                    .spawn()
+            });
+        }
     });
-    if let Err(e) = spawned {
-        log::warn!("fenêtre principale : {e}");
-    }
 }
 
 fn mouse_pos() -> egui::Pos2 {
@@ -1486,20 +1499,23 @@ fn screen_at(screens: &[Screen], p: Point) -> Screen {
         .clone()
 }
 
-/// Place par défaut de la `i`-ième boîte : en haut à droite de l'écran principal, en
-/// cascade.
+/// Place par défaut de la `i`-ième boîte sans position : en colonnes depuis le coin en
+/// haut à droite de l'écran principal, sans chevauchement (écart de 10 points).
 fn default_rect(screens: &[Screen], i: usize) -> Rect {
     let v = screens
         .iter()
         .find(|s| s.primary)
         .unwrap_or(&screens[0])
         .visible_frame;
-    let offset = 30.0 * i as f32;
+    let (w, h) = (NEW_BOX_SIZE[0], NEW_BOX_SIZE[1]);
+    let (margin, gap) = (40.0, 10.0);
+    let rows = (((v.height - 2.0 * margin + gap) / (h + gap)).floor() as usize).max(1);
+    let (col, row) = ((i / rows) as f32, (i % rows) as f32);
     Rect::new(
-        v.right() - NEW_BOX_SIZE[0] - 40.0 - offset,
-        v.y + 40.0 + offset,
-        NEW_BOX_SIZE[0],
-        NEW_BOX_SIZE[1],
+        v.right() - margin - w - col * (w + gap),
+        v.y + margin + row * (h + gap),
+        w,
+        h,
     )
     .clamped_to(&v)
 }

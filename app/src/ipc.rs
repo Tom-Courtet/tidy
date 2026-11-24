@@ -28,8 +28,11 @@ pub enum Request {
     Ping,
     /// État de l'agent (pour la fenêtre principale).
     Status,
-    /// Ouvrir (ou ramener devant) la fenêtre principale.
-    OpenManager,
+    /// Ouvrir (ou ramener devant) la fenêtre principale, sur `page` si donnée.
+    OpenManager {
+        #[serde(default)]
+        page: Option<String>,
+    },
     /// `config.json` a changé : le relire et prévenir les autres processus.
     ReloadSettings,
     /// `desktop.json` a changé.

@@ -360,7 +360,10 @@ impl Manager {
     fn handle_events(&mut self, ctx: &egui::Context) {
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::FocusManager => {
+                Event::FocusManager { page } => {
+                    if let Some(page) = page.as_deref().and_then(Page::from_arg) {
+                        self.page = page;
+                    }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }

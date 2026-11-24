@@ -61,8 +61,12 @@ pub enum Event {
     },
     /// Ouvrir le lanceur de recherche.
     OpenSearch,
-    /// Ramener la fenêtre principale devant (elle est déjà ouverte).
-    FocusManager,
+    /// Ramener la fenêtre principale devant (elle est déjà ouverte), sur `page` si
+    /// donnée (`options`, `boxes`… comme `tidy --manager <page>`).
+    FocusManager {
+        #[serde(default)]
+        page: Option<String>,
+    },
     /// Créer une boîte (menu du bureau, `tidy --create-box`), à `at` ou sous la souris.
     CreateBox {
         at: Option<crate::geometry::Point>,
