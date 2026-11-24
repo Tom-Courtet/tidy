@@ -58,6 +58,8 @@ objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-service-management = { version = "0.3.2", default-features = false }
 windows-sys = "0.61"
 windows = { version = "0.62.2", default-features = false }
+# Surveillance du dossier du bureau (agent, lot A).
+notify = "9.0.0"
 
 [profile.release]
 opt-level = "s"

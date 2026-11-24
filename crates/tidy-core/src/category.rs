@@ -1,8 +1,9 @@
 //! Catégories d'éléments du bureau et extensions par défaut.
 //!
 //! Les listes viennent de l'annexe A du bilan de l'original (faits techniques), adaptées
-//! à macOS. Le classement fin (UTI de macOS, alias, liens de lanceurs de jeux) est fait
-//! par le moteur de règles ; ce module ne connaît que les extensions.
+//! à macOS. Le classement fin (cible des raccourcis `.lnk`, liens de lanceurs de jeux)
+//! est fait à la lecture du dossier ([`crate::scan`]) ; ce module ne connaît que les
+//! extensions et les adresses des lanceurs de jeux.
 
 use serde::{Deserialize, Serialize};
 
@@ -59,7 +60,8 @@ impl Category {
     /// reconnues autrement (dossiers, jeux, autres).
     pub fn default_extensions(self) -> &'static [&'static str] {
         match self {
-            Category::Application => &["app"],
+            // `.lnk` : raccourci Windows ; sa cible affine le classement (`scan`).
+            Category::Application => &["app", "lnk"],
             Category::Folder | Category::Game | Category::Other => &[],
             Category::Document => &[
                 "docx", "doc", "pdf", "txt", "rtf", "docm", "wps", "xls", "xlsx", "xlsm", "ppt",
@@ -121,9 +123,10 @@ impl Category {
                 "sparsebundle",
                 "sparseimage",
             ],
-            // Sur macOS : installeurs et scripts exécutables.
+            // Installeurs et scripts exécutables (Windows et macOS).
             Category::Executable => &[
-                "pkg", "mpkg", "dmg", "command", "sh", "tool", "exe", "msi", "bat",
+                "pkg", "mpkg", "dmg", "command", "sh", "tool", "exe", "msi", "msix", "appx", "bat",
+                "cmd", "com", "apk", "ps1",
             ],
             Category::WebLink => &["webloc", "url", "inetloc"],
         }
@@ -143,10 +146,18 @@ pub fn extension_of(name: &str) -> Option<String> {
 /// Catégorie d'après le seul nom et la nature (dossier ou non), avec les listes par
 /// défaut. Un paquet `.app` est une application même si c'est un dossier.
 pub fn classify_by_extension(name: &str, is_dir: bool) -> Category {
-    let ext = extension_of(name);
-    if let Some(ext) = &ext {
+    classify_with(name, is_dir, |category, ext| {
+        category.default_extensions().contains(&ext)
+    })
+}
+
+/// Comme [`classify_by_extension`], avec des listes choisies par l'appelant :
+/// `has(catégorie, extension)` dit si l'extension appartient à la catégorie. Les
+/// catégories sont essayées dans l'ordre de [`Category::ALL`] ; la première gagne.
+pub fn classify_with(name: &str, is_dir: bool, has: impl Fn(Category, &str) -> bool) -> Category {
+    if let Some(ext) = extension_of(name) {
         for category in Category::ALL {
-            if category.default_extensions().contains(&ext.as_str()) {
+            if has(category, &ext) {
                 return category;
             }
         }
@@ -157,6 +168,36 @@ pub fn classify_by_extension(name: &str, is_dir: bool) -> Category {
         Category::Other
     }
 }
+
+/// Préfixes d'adresse des lanceurs de jeux (Steam, Epic, Ubisoft, EA, Battle.net,
+/// Roblox) : un lien `.url` ou `.webloc` qui commence ainsi est un jeu.
+pub const GAME_URL_SCHEMES: [&str; 8] = [
+    "steam://",
+    "com.epicgames.launcher://",
+    "uplay://",
+    "origin2://",
+    "origin://",
+    "battlenet://",
+    "roblox://",
+    "roblox-player:",
+];
+
+/// Catégorie d'un lien Internet d'après son adresse : jeu ou lien web.
+pub fn classify_url(url: &str) -> Category {
+    let url = url.trim();
+    let is_game = GAME_URL_SCHEMES.iter().any(|scheme| {
+        url.get(..scheme.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+    });
+    if is_game {
+        Category::Game
+    } else {
+        Category::WebLink
+    }
+}
+
+/// Extensions de cible qui font d'un raccourci une application.
+pub const PROGRAM_EXTENSIONS: [&str; 4] = ["exe", "bat", "cmd", "com"];
 
 #[cfg(test)]
 mod tests {
@@ -195,5 +236,42 @@ mod tests {
             classify_by_extension("Install.dmg", false),
             Category::Executable
         );
+        assert_eq!(
+            classify_by_extension("Setup.EXE", false),
+            Category::Executable
+        );
+        assert_eq!(
+            classify_by_extension("Firefox.lnk", false),
+            Category::Application
+        );
+    }
+
+    #[test]
+    fn custom_lists_replace_defaults() {
+        // « pdf » déplacé vers « Autres » par l'utilisateur.
+        let has = |c: Category, ext: &str| match c {
+            Category::Document => ext == "docx",
+            Category::Other => ext == "pdf",
+            _ => c.default_extensions().contains(&ext),
+        };
+        assert_eq!(classify_with("a.pdf", false, has), Category::Other);
+        assert_eq!(classify_with("a.docx", false, has), Category::Document);
+        assert_eq!(classify_with("a.png", false, has), Category::Image);
+    }
+
+    #[test]
+    fn game_launcher_links() {
+        assert_eq!(classify_url("steam://rungameid/570"), Category::Game);
+        assert_eq!(
+            classify_url("com.epicgames.launcher://apps/Fortnite?action=launch"),
+            Category::Game
+        );
+        assert_eq!(classify_url("UPLAY://launch/635/0"), Category::Game);
+        assert_eq!(classify_url("origin2://game/launch"), Category::Game);
+        assert_eq!(classify_url("battlenet://WoW"), Category::Game);
+        assert_eq!(classify_url(" roblox://placeId=1 "), Category::Game);
+        assert_eq!(classify_url("https://example.org"), Category::WebLink);
+        assert_eq!(classify_url("steam"), Category::WebLink);
+        assert_eq!(classify_url(""), Category::WebLink);
     }
 }

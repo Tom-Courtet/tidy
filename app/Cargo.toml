@@ -27,6 +27,9 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 tray-icon.workspace = true
 winit.workspace = true
+# Surveillance du dossier du bureau (lot A).
+notify.workspace = true
+jiff.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

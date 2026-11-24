@@ -108,3 +108,19 @@ other = "Autres"
 
 [error]
 agent_unreachable = "L'agent de Tidy ne répond pas."
+
+[organize]
+box_programs = "Programmes"
+box_folders = "Dossiers"
+box_files = "Fichiers et documents"
+group_today = "Aujourd'hui"
+group_yesterday = "Hier"
+group_this_week = "Cette semaine"
+group_this_month = "Ce mois-ci"
+group_older = "Plus ancien"
+no_desktop = "Dossier du bureau introuvable."
+scan_failed = "Lecture du bureau impossible : {error}"
+snapshot_failed = "Copie de sécurité d'avant le rangement impossible : {error}"
+settings_failed = "Réglages de rangement non enregistrés : {error}"
+nothing_to_undo = "Aucun rangement à annuler."
+undo_unreadable = "Copie d'avant le rangement illisible : {error}"
