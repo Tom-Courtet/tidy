@@ -20,11 +20,14 @@ use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::screen::Screen;
 
+mod convert;
 pub mod finder;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(any(target_os = "macos", windows)))]
 mod other;
+#[cfg(any(target_os = "macos", windows))]
+mod recycle;
 #[cfg(windows)]
 mod windows;
 
