@@ -4,6 +4,7 @@
 //! Règle : aucune couleur ni aucun texte visible codé en dur ailleurs. Les couleurs
 //! viennent de [`theme`], les textes de [`t!`].
 
+pub mod hotkey;
 pub mod i18n;
 pub mod icons;
 pub mod keys;
