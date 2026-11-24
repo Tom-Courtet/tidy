@@ -128,6 +128,9 @@ Les lots d'une même vague tournent en parallèle, chacun dans son worktree, sur
 - 🛑 **Validation** : tu testes sur ton Mac (Spaces, écran externe, Mission Control, plantage simulé du bureau, retour des icônes). Si la surface plein écran coûte trop de mémoire, on passe à une fenêtre par boîte avant d'aller plus loin.
 
 ### Vague 1 · Boîtes (jalons 2 et 3 du prompt), 4 lots en parallèle
+
+**État (25/11/2026)** : faite. Les 4 lots sont fusionnés et vérifiés (fmt, clippy macOS et Windows, 151 tests) ; essai de bout en bout sous macOS sur un faux bureau (démarrage rapide, nouveau fichier rangé à l'arrivée). Essais réels sous Windows à faire.
+
 | Lot | Contenu | Où |
 |---|---|---|
 | **A · Moteur** | Classement (UTI et extensions), règles avec priorités, boîte fourre-tout, éléments non affectés, « Appliquer aux non affectés » ou « à tous », tri (nom, type, date, taille, manuel), regroupement par date, aimantation (alignement, écart de 10 px, multiples d'icône, ⇧ pour l'ignorer, évitement), positions par écran (UUID de l'écran et coordonnées relatives, par configuration d'écrans). Tests unitaires et tests sur un faux `~/Desktop`. | `tidy-core` |

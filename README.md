@@ -6,10 +6,11 @@ Organiseur de bureau léger et personnalisable pour **Windows** (10 et 11) et ma
 sur le bureau, rangement automatique, widgets, recherche rapide, fonds d'écran. De la
 même famille que Snappy, Tappy et Soundy.
 
-> **État : vague 0 bis (prototype Windows et macOS).** Agent, fenêtre principale et boîtes
-> posées sur le bureau (une fenêtre par boîte : créer, déplacer, redimensionner, supprimer,
-> masquer). Vérifié sous macOS ; sous Windows, compilé et testé en CI, essais réels en
-> cours. Prochaine étape : les vraies boîtes (vague 1). Plan : [PLAN.md](PLAN.md), parité :
+> **État : vague 1 faite (les vraies boîtes).** Rangement automatique avec règles,
+> nouveaux fichiers rangés à leur arrivée, boîtes avec les vraies icônes, menus, onglets,
+> enroulement, aimantation, portails de dossier, assistant de premier lancement. Vérifié
+> sous macOS ; sous Windows, compilé et testé en CI, essais réels en cours. Prochaine
+> étape : dispositions, boîte privée, recherche, widgets (vague 2). Plan : [PLAN.md](PLAN.md), parité :
 > [docs/FEATURES.md](docs/FEATURES.md).
 >
 > **Windows** : chaque push sur `main` compile `tidy.exe` (onglet *Actions* du dépôt,
@@ -64,6 +65,7 @@ tidy --background        # lance l'agent seul (ouverture de session)
 tidy --manager [page]    # fenêtre principale (options, diagnostic…)
 tidy --create-box        # crée une boîte sous la souris (menu du bureau sous Windows)
 tidy --toggle-desktop    # masque ou montre le bureau
+tidy --organize          # range le bureau selon les règles (--undo-organize : annule)
 tidy --restore-desktop   # rend les icônes du bureau si Tidy les a masquées
 tidy --uninstall         # retire Tidy du système (menu du bureau, démarrage, icônes)
 tidy --quit              # arrête Tidy

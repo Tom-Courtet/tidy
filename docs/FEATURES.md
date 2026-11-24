@@ -13,10 +13,10 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | i18n FR/EN, extensible | fait | 0 | `t!`, TOML embarqués, test des clés |
 | Configuration JSON versionnée, migrations, écriture atomique | fait | 0 | `config.json`, `desktop.json` |
 | Journaux avec rotation (7 jours) | fait | 0 | `tracing`, `logs/<rôle>.log.*` |
-| Panneau Diagnostic | partiel | 0 | version, dossiers, Finder, écrans ; rapport à copier : vague 3 |
+| Panneau Diagnostic | fait | 1 | version, dossiers, écrans, « Copier le rapport » |
 | Démarrage à l'ouverture de session | fait | 0 | `SMAppService`, seulement depuis `Tidy.app` |
-| Raccourcis globaux | partiel | 0 | enregistrés depuis les réglages ; éditeur et conflits : vague 1 |
-| Assistant de premier lancement (Démarrage rapide / Personnaliser) | à faire | 1 | |
+| Raccourcis globaux | fait | 1 | éditeur, conflits internes, avertissement pour les raccourcis du système |
+| Assistant de premier lancement (Démarrage rapide / Personnaliser) | fait | 1 | relançable depuis Options |
 | Interrupteur global des boîtes | fait | 0 | menu de la barre des menus, Options |
 
 ## Bureau
@@ -31,27 +31,37 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | Icônes de l'Explorateur : tout masquer / montrer | partiel | 0 bis | `ShowWindow` sur la liste du bureau, sans injection ; à tester |
 | Icônes rangées masquées du bureau système | partiel | 0 bis | Windows : déplacées hors de l'écran, journal des positions (ADR 012) ; branchement au contenu des boîtes : vague 1 |
 | Sécurité du Finder (plantages, arrêt, secours) | fait | 0 | 3 plantages/min → retour des icônes ; `--restore-finder` |
-| Positions par configuration d'écrans | partiel | 0 | modèle et tests ; changements d'écran à chaud : vague 1 |
+| Positions par configuration d'écrans | fait | 1 | changements d'écran à chaud |
 | Double-clic pour masquer | partiel | 0 bis | Windows : crochet souris bas niveau + sélection vide ; macOS : à faire |
 
 ## Boîtes
 
+« fait » = fait et vérifié sous macOS ; sous Windows, compilé et testé en CI, essais réels à faire (`docs/manual-tests.md`).
+
 | Fonction | Statut | Vague | Notes |
 |---|---|---|---|
-| Création manuelle, déplacer, redimensionner, renommer, supprimer | partiel | 0 bis | créer, déplacer, redimensionner, supprimer : faits ; renommer : vague 1 |
-| Création en dessinant un rectangle | à faire | 1 | surcouche temporaire (ADR 011) |
+| Créer, déplacer, redimensionner, renommer, supprimer une boîte | fait | 1 | suppression : éléments rendus au bureau, aucun fichier touché |
+| Création en dessinant un rectangle | partiel | 1 | Windows : crochet souris + bouton « Créer une boîte » ; macOS : pas encore |
 | Menu du bureau « Créer une boîte » | partiel | 0 bis | Windows : verbe du registre (Win 11 : « Afficher plus d'options ») ; `tidy --create-box` |
-| Glisser-déposer (bureau, boîtes, Finder) | à faire | 1 | |
-| Icônes système, miniatures, ouverture, menu contextuel | à faire | 1 | |
-| Rangement automatique, règles par catégorie, priorités, fourre-tout | partiel | 1 | moteur de règles et catégories (annexe A) faits |
-| « Appliquer aux non affectées » / « à toutes » | à faire | 1 | |
-| Tri (nom, type, date, taille, manuel), regroupement par date | à faire | 1 | modèle prêt |
-| Apparence (couleurs, police, transparence, coins, verre) | à faire | 1 | modèle prêt |
-| Enroulement, Smarter Roll, enroulement au bord | à faire | 1 | |
-| Onglets dans une boîte | à faire | 1 | modèle prêt |
-| Raccourci par boîte, accès rapide (maintenir / bascule) | à faire | 1 | événements prêts |
-| Aimantation (alignement, 10 px, Maj) | à faire | 1 | |
-| Portail de dossier | à faire | 1 | interdit sur un dossier du bureau |
+| Contenu réel : grille/liste, tri, regroupement par date, sélection, ouverture | fait | 1 | simple ou double clic selon le réglage |
+| Icônes système et miniatures | fait | 1 | cache borné ; repli Lucide par catégorie |
+| Menu d'un élément | fait | 1 | Windows : menu natif de l'Explorateur ; macOS : menu Tidy (ouvrir, afficher, renommer, corbeille, copier le chemin, retirer) |
+| Renommer un fichier, corbeille | fait | 1 | jamais de suppression définitive |
+| Glisser-déposer | partiel | 1 | dépôt d'un élément du bureau dans une boîte ; glisser vers l'Explorateur/Finder ; fichier venu d'ailleurs refusé (message) |
+| Rangement automatique, règles, priorités, fourre-tout, non affectés | fait | 1 | classement des raccourcis `.lnk`, liens `.url`/`.webloc`, jeux |
+| Démarrage rapide (boîtes par défaut) | fait | 1 | « Programmes », « Dossiers », « Fichiers et documents » ; `tidy --organize` |
+| Nouveaux fichiers rangés à leur arrivée | fait | 1 | surveillance du bureau (`notify`), renommage reconnu |
+| « Appliquer aux non affectées / à toutes », « Tout annuler » | fait | 1 | copie `desktop.before-organize.json` |
+| Bandeau des icônes non affectées | fait | 1 | pilule en bas de l'écran |
+| Tri (nom naturel, type, date, taille, manuel) | fait | 1 | |
+| Apparence (couleurs, titre, opacité, coins, bordure, icônes) | partiel | 1 | fond « verre dépoli » pas fait |
+| Enroulement, Smarter Roll, enroulement au bord | fait | 1 | |
+| Onglets (fusionner, détacher, renommer) | fait | 1 | |
+| Aimantation (bords, autres boîtes, 10 px, Maj) | fait | 1 | |
+| Accès rapide (maintenir / bascule), raccourci par boîte | fait | 1 | à essayer sous Windows (premier plan) |
+| Portail de dossier | fait | 1 | en direct, sous-dossiers, fil d'Ariane ; refusé pour un dossier du bureau |
+| Icônes rangées masquées du bureau système | partiel | 1 | Windows (ADR 012) ; macOS : non |
+| Bureau public de Windows (`C:\Users\Public\Desktop`) | à faire | 2 | |
 | Boîte privée chiffrée | à faire | 2 | ADR 006 |
 
 ## Dispositions, recherche, widgets, fonds d'écran

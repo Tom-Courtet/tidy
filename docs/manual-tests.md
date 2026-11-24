@@ -63,6 +63,41 @@ Journaux : `<données>\logs\` (Options > Diagnostic > Ouvrir les journaux). Plus
 - [ ] Gestionnaire des tâches, colonne Mémoire : agent et bureau avec 1 puis 5 boîtes.
 - [ ] Processeur au repos ≈ 0 %.
 
+### Vague 1 : les vraies boîtes
+Essaie d'abord sur un **faux bureau** : crée un dossier `C:\TidyEssai` avec quelques fichiers (pdf, images, un raccourci de jeu Steam, un dossier), puis :
+
+```powershell
+$env:TIDY_DATA_DIR = "$env:TEMP\tidy-essai"; $env:TIDY_DESKTOP_DIR = "C:\TidyEssai"; .\tidy.exe
+```
+
+Les boîtes montrent alors ce dossier (les icônes de l'Explorateur ne sont pas concernées : elles ne viennent que du vrai bureau).
+
+**Assistant et rangement**
+- [ ] Premier lancement : l'assistant s'ouvre ; « Démarrage rapide » crée « Programmes », « Dossiers », « Fichiers et documents » et range tout.
+- [ ] Les raccourcis de jeux Steam/Epic vont dans « Programmes » ; les raccourcis vers des programmes aussi.
+- [ ] Copier un nouveau fichier dans le dossier : il est rangé en quelques secondes. Le renommer dans l'Explorateur : il reste dans sa boîte.
+- [ ] Rangement > « Tout annuler » : on retrouve l'état d'avant.
+- [ ] Une catégorie sans boîte cible : le nouveau fichier apparaît dans le bandeau « non affectées » ; « Appliquer les règles » le range.
+
+**Dans une boîte**
+- [ ] Les icônes sont les vraies icônes de Windows (miniatures des images).
+- [ ] Double-clic ouvre le fichier ; clic droit donne le **menu de l'Explorateur** (Ouvrir avec, Envoyer vers, Propriétés…).
+- [ ] Renommer (F2), Mettre à la corbeille (Suppr) : le fichier part bien à la corbeille.
+- [ ] Glisser un fichier d'une boîte vers une autre boîte : il change de boîte ; vers un dossier de l'Explorateur : l'Explorateur le déplace ou le copie comme d'habitude.
+- [ ] Menu ☰ : trier, grille/liste, taille des icônes, enrouler, onglets (nouvel onglet, fusionner, détacher), nouvelle boîte, supprimer.
+- [ ] Enroulement automatique : la boîte s'enroule quand la souris s'en va, se déroule au survol.
+- [ ] Déplacer une boîte près d'une autre : elle s'aligne (Maj enfoncée : pas d'aimantation).
+- [ ] Portail de dossier : affiche un dossier en direct, navigation dans les sous-dossiers.
+
+**Sur le vrai bureau** (quand tout ce qui précède va bien)
+- [ ] Les icônes rangées disparaissent du bureau de Windows ; « Quitter Tidy » les remet toutes à leur place.
+- [ ] Tracer un rectangle sur le bureau vide : un bouton « Créer une boîte » apparaît.
+- [ ] Accès rapide (Alt+` maintenu) : les boîtes passent devant les applis, puis redescendent.
+
+**Fenêtre principale**
+- [ ] Pages Boîtes (apparence, aperçu), Rangement (extensions, boîte cible), Actions rapides ; saisie d'un raccourci et refus d'un doublon.
+- [ ] Menu ☰ d'une boîte > « Apparence… » : la fenêtre principale s'ouvre (ou revient) sur la page Boîtes, sans en ouvrir une deuxième.
+
 ## macOS
 
 Avec des données jetables :
