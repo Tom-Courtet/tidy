@@ -106,3 +106,19 @@ other = "Other"
 
 [error]
 agent_unreachable = "Tidy's agent is not responding."
+
+[organize]
+box_programs = "Programs"
+box_folders = "Folders"
+box_files = "Files & Documents"
+group_today = "Today"
+group_yesterday = "Yesterday"
+group_this_week = "This week"
+group_this_month = "This month"
+group_older = "Older"
+no_desktop = "Desktop folder not found."
+scan_failed = "Can't read the desktop: {error}"
+snapshot_failed = "Can't save a backup before organizing: {error}"
+settings_failed = "Organization settings not saved: {error}"
+nothing_to_undo = "Nothing to undo."
+undo_unreadable = "The pre-organization backup is unreadable: {error}"
