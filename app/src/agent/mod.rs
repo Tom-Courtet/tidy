@@ -13,6 +13,7 @@ mod hotkeys;
 pub mod organizer;
 mod supervisor;
 mod tray;
+mod watcher;
 
 use std::path::PathBuf;
 use std::process::{Child, Command as Process};
@@ -70,6 +71,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
     let desktop_hidden = Arc::new(Mutex::new(false));
     let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
     supervisor.send(Command::Apply(settings.effective_desktop_mode()));
+    organizer::start(store.clone(), bus.clone(), Arc::clone(&shared));
 
     let handler = {
         let proxy = proxy.clone();
