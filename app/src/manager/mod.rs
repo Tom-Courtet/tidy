@@ -107,6 +107,11 @@ pub fn run(store: Store, page: Option<Page>) -> Result<()> {
     if let Err(e) = ipc::subscribe(
         &store,
         move |event| {
+            // Arrêt immédiat : une fenêtre cachée ne verrait pas l'événement avant
+            // d'être redessinée. Tout est déjà enregistré.
+            if event == Event::Shutdown {
+                std::process::exit(0);
+            }
             let _ = tx.send(event);
             if let Some(ctx) = wake.get() {
                 ctx.request_repaint();

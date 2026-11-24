@@ -89,6 +89,26 @@ pub fn on_reopen(on_reopen: impl Fn() + Send + Sync + 'static) {
     let _ = on_reopen;
 }
 
+/// Passe au premier plan les fenêtres d'un autre processus de Tidy (la fenêtre
+/// principale déjà ouverte, par exemple). `false` si le processus est introuvable.
+pub fn activate_process(pid: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+        let Ok(pid) = i32::try_from(pid) else {
+            return false;
+        };
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid).is_some_and(|app| {
+            app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 /// Implémentation pour l'OS courant.
 pub fn current() -> &'static dyn DesktopPlatform {
     #[cfg(target_os = "macos")]

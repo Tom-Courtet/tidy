@@ -196,7 +196,11 @@ impl App {
         if let Some(child) = &mut self.manager
             && matches!(child.try_wait(), Ok(None))
         {
-            self.bus.publish(Event::FocusManager);
+            // Une fenêtre cachée derrière d'autres ne se redessine pas : c'est le
+            // système qui la ramène devant, pas un événement.
+            if !tidy_platform::activate_process(child.id()) {
+                self.bus.publish(Event::FocusManager);
+            }
             return;
         }
         match std::env::current_exe().and_then(|exe| Process::new(exe).arg("--manager").spawn()) {

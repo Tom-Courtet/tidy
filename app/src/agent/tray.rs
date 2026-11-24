@@ -50,8 +50,21 @@ impl Tray {
                 on_choice(choice);
             }
         }));
-        let icon = TrayIconBuilder::new()
-            .with_icon_templated(template_icon(44)?)
+        let builder = TrayIconBuilder::new();
+        // macOS : icône « modèle », adaptée au thème de la barre des menus. Ailleurs :
+        // le logo en couleur.
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_templated(template_icon(44)?);
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(
+            Icon::from_rgba(
+                include_bytes!("../../../assets/icon_64.rgba").to_vec(),
+                64,
+                64,
+            )
+            .context("icône de la zone de notification")?,
+        );
+        let icon = builder
             .with_tooltip(t!("tray.tooltip"))
             .with_menu_on_left_click(true)
             .build()
@@ -97,11 +110,13 @@ impl Tray {
 
 /// Icône « modèle » (noir et transparence, macOS l'adapte au thème) : le logo de Tidy
 /// en silhouette, sur une grille de 48 ramenée à `size` pixels.
+#[cfg(target_os = "macos")]
 fn template_icon(size: u32) -> Result<Icon> {
     Icon::from_rgba(template_rgba(size), size, size).context("icône de la barre des menus")
 }
 
 /// Pixels RGBA de l'icône modèle.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn template_rgba(size: u32) -> Vec<u8> {
     let unit = size as f32 / 48.0;
     // Dans la grille de 48, avec une marge de 4 : contour de la boîte, barre de titre
