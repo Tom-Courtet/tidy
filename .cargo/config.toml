@@ -1,0 +1,4 @@
+# CRT statique : l'exe Windows n'a pas besoin du redistribuable Visual C++.
+# /ignore:4099 : les .pdb de la CRT de Microsoft ne sont pas fournis, avertissement sans objet.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/ignore:4099"]
