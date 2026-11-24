@@ -95,6 +95,8 @@ pub struct BoxOutput {
     pub hovered: bool,
     /// Un clic a eu lieu dans la fenêtre.
     pub pressed: bool,
+    /// Un bouton a été relâché dans la fenêtre.
+    pub released: bool,
     /// Un élément est glissé depuis cette boîte.
     pub dragging: bool,
     /// Maj enfoncée (pour ignorer l'aimantation).
@@ -153,6 +155,7 @@ pub fn draw(
     let mut result = BoxOutput {
         hovered: ctx.input(|i| i.pointer.hover_pos().is_some()),
         pressed: ctx.input(|i| i.pointer.any_pressed()),
+        released: ctx.input(|i| i.pointer.any_released()),
         shift: ctx.input(|i| i.modifiers.shift),
         ..Default::default()
     };

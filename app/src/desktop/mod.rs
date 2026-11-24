@@ -136,6 +136,10 @@ pub fn run(store: Store) -> Result<()> {
             let platform = tidy_platform::current();
             platform.make_desktop_surface(cc, host, SurfaceLevel::DesktopIcons);
             tidy_ui::theme::apply(&cc.egui_ctx);
+            // Pas de curseur clignotant : il redessinerait toutes les boîtes deux fois par
+            // seconde pendant un renommage.
+            cc.egui_ctx
+                .style_mut_of(egui::Theme::Dark, |s| s.visuals.text_cursor.blink = false);
             let ctx = cc.egui_ctx.clone();
             let _ = ctx_cell.set(ctx.clone());
             let channels = Channels::install(&ctx, &settings);
@@ -1538,6 +1542,7 @@ impl eframe::App for Desktop {
         self.icons.sweep();
         let mut out: Vec<Action> = Vec::new();
         let mut pressed = false;
+        let mut released = false;
         let drop_target = self
             .drag
             .as_ref()
@@ -1583,6 +1588,7 @@ impl eframe::App for Desktop {
             drop(view);
             win.sections = sections;
             pressed |= res.pressed;
+            released |= res.released;
             if res.hovered {
                 win.last_hover = Instant::now();
             } else if win.hovered {
@@ -1613,13 +1619,15 @@ impl eframe::App for Desktop {
         if self.drag.is_some() {
             // Suivre la souris pour montrer la boîte visée.
             ctx.request_repaint_after(Duration::from_millis(50));
-            if !ctx.input(|i| i.pointer.any_down()) && out.is_empty() {
-                // Relâché hors de toute fenêtre de Tidy sans fin de glisser reçue.
+            // Bouton relâché sans fin de glisser (l'élément glissé a disparu entre-temps) :
+            // terminer quand même, sinon la boîte visée resterait en surbrillance.
+            if released && !out.iter().any(|a| matches!(a, Action::EndDrag { .. })) {
                 let from = self.drag.as_ref().map(|d| d.from);
-                if let Some(from) = from
-                    && !self.windows.values().any(|w| w.hovered)
-                {
-                    self.end_drag(from, None);
+                if let Some(from) = from {
+                    out.push(Action::EndDrag {
+                        b: from,
+                        before: None,
+                    });
                 }
             }
         }
@@ -1712,7 +1720,10 @@ mod tests {
             sections: Vec::new(),
             sections_key: (0, 0),
         };
-        assert_eq!(win.shown(&[]), Rect::new(100.0, 800.0 - TITLE_HEIGHT, 300.0, TITLE_HEIGHT));
+        assert_eq!(
+            win.shown(&[]),
+            Rect::new(100.0, 800.0 - TITLE_HEIGHT, 300.0, TITLE_HEIGHT)
+        );
         win.anchored_bottom = false;
         assert_eq!(win.shown(&[]), Rect::new(100.0, 600.0, 300.0, TITLE_HEIGHT));
     }

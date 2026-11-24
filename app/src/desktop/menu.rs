@@ -348,6 +348,8 @@ pub fn height(entries: &[Entry]) -> f32 {
 /// Dessine les entrées ; rend celle qui est cliquée.
 pub fn draw(ui: &mut Ui, entries: &[Entry]) -> Option<EntryKind> {
     let mut chosen = None;
+    // Hauteurs exactes (voir `height`) : pas d'espace entre les entrées.
+    ui.spacing_mut().item_spacing.y = 0.0;
     let width = ui.available_width();
     for entry in entries {
         match entry {

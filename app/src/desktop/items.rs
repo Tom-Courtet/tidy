@@ -562,14 +562,15 @@ fn paint_label(ui: &Ui, v: &ItemsView, info: &ItemInfo, rect: Rect, grid: bool) 
     let font = label_font(v.look);
     let color = super::boxwin::color(v.look.label_color, 1.0);
     // Estimation du nombre de caractères qui tiennent, pour garder l'extension.
-    let per_line = (rect.width() / (font.size * 0.52)).floor().max(4.0) as usize;
+    let per_line = (rect.width() / (font.size * 0.6)).floor().max(4.0) as usize;
     let lines = if grid { 2 } else { 1 };
     let text = ellipsize_middle(&info.name, per_line * lines);
     let mut job = LayoutJob::simple(text, font, color, rect.width());
     job.wrap = TextWrapping {
         max_width: rect.width(),
         max_rows: lines,
-        break_anywhere: true,
+        // Grille : couper entre les mots ; liste : une ligne, coupée n'importe où.
+        break_anywhere: !grid,
         overflow_character: Some('…'),
     };
     if grid {
