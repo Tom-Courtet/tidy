@@ -1,11 +1,13 @@
 //! Implémentation macOS (AppKit et CoreGraphics via objc2).
 
+mod files;
 mod login;
 pub mod reopen;
 mod screens;
+mod watch;
 mod window;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use objc2_app_kit::NSEvent;
@@ -14,7 +16,7 @@ use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::screen::Screen;
 
-use crate::{DesktopPlatform, LoginState, SurfaceLevel};
+use crate::{Callback, DesktopPlatform, IconImage, LoginState, SurfaceLevel};
 
 pub struct MacPlatform;
 
@@ -49,9 +51,35 @@ impl DesktopPlatform for MacPlatform {
         anyhow::bail!("masquage rapide des icônes du Finder indisponible")
     }
 
-    fn watch_desktop_double_click(&self, _on_double_click: crate::Callback) -> bool {
-        // À faire : moniteur global + vérification que le clic tombe sur le bureau.
+    fn watch_desktop_double_click(&self, _on_double_click: Callback) -> bool {
+        // Un moniteur global voit le double-clic et la fenêtre du Finder visée, mais
+        // pas s'il tombe sur une icône ou sur le vide (il faudrait l'accessibilité,
+        // donc une autorisation de plus) : on ne le propose pas.
         false
+    }
+
+    fn file_icon(&self, path: &Path, size_px: u32, _thumbnail: bool) -> Option<IconImage> {
+        // Miniatures QuickLook : pas encore (l'icône du Finder montre déjà un aperçu
+        // pour beaucoup de documents).
+        files::file_icon(path, size_px)
+            .inspect_err(|e| log::debug!("icône de {} : {e:#}", path.display()))
+            .ok()
+    }
+
+    fn start_file_drag(&self, window_title: &str, paths: &[PathBuf]) -> Result<bool> {
+        files::start_drag(window_title, paths)
+    }
+
+    fn trash(&self, paths: &[PathBuf]) -> Result<()> {
+        crate::recycle::move_to_trash(paths)
+    }
+
+    fn watch_screens(&self, on_change: Callback) -> bool {
+        watch::watch_screens(on_change)
+    }
+
+    fn raise_desktop_surface(&self, title: &str, raised: bool) {
+        window::raise(title, raised);
     }
 
     fn set_desktop_menu(&self, _label: Option<&str>) -> Result<()> {
