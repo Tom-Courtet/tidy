@@ -1,10 +1,38 @@
 [package]
 name = "tidy-platform"
+description = "Couche système de Tidy : fenêtres du bureau, écrans, Finder, ouverture de session"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+raw-window-handle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tidy-core.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2.workspace = true
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["std", "libc", "block2", "objc2-core-foundation", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSScreen", "NSGraphics", "NSEvent", "NSWorkspace", "NSRunningApplication"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }
+objc2-core-graphics = { workspace = true, features = ["std", "libc", "CGDirectDisplay", "CGDisplayConfiguration", "CGError", "CGWindowLevel"] }
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSEnumerator", "NSGeometry", "NSObject", "NSURL", "NSUserDefaults", "NSLocale"] }
+objc2-service-management = { workspace = true, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# `unsafe` autorisé ici seulement (appels Objective-C et Win32), avec `// SAFETY:`.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
