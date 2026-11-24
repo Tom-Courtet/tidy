@@ -175,6 +175,62 @@ pub const CHEVRON_LEFT: &str = "\u{E06E}";
 pub const CHEVRON_RIGHT: &str = "\u{E06F}";
 /// `arrow-left`
 pub const BACK: &str = "\u{E048}";
+/// `arrow-right`
+pub const NEXT: &str = "\u{E049}";
+/// `rows-3`
+pub const ROWS: &str = "\u{E58A}";
+/// `layout-list`
+pub const LAYOUT_LIST: &str = "\u{E1D9}";
+/// `arrow-down-a-z`
+pub const SORT_NAME: &str = "\u{E415}";
+/// `calendar-days`
+pub const CALENDAR_DAYS: &str = "\u{E2B9}";
+/// `hard-drive`
+pub const DRIVE: &str = "\u{E0ED}";
+/// `folder-tree`
+pub const FOLDER_TREE: &str = "\u{E33C}";
+/// `move`
+pub const MOVE: &str = "\u{E121}";
+/// `merge`
+pub const MERGE: &str = "\u{E43F}";
+/// `split`
+pub const SPLIT: &str = "\u{E440}";
+/// `type`
+pub const TITLE: &str = "\u{E198}";
+/// `square-round-corner`
+pub const CORNERS: &str = "\u{E648}";
+/// `blend`
+pub const OPACITY: &str = "\u{E59C}";
+/// `droplets`
+pub const GLASS: &str = "\u{E0B5}";
+/// `scaling`
+pub const ICON_SIZE: &str = "\u{E2EC}";
+/// `mouse-pointer-2`
+pub const POINTER: &str = "\u{E1C3}";
+/// `hand`
+pub const HAND: &str = "\u{E1D7}";
+/// `circle-check`
+pub const DONE: &str = "\u{E226}";
+/// `circle-alert`
+pub const ALERT: &str = "\u{E077}";
+/// `clipboard-copy`
+pub const CLIPBOARD: &str = "\u{E225}";
+/// `tag`
+pub const TAG: &str = "\u{E17F}";
+/// `inbox`
+pub const INBOX: &str = "\u{E0F7}";
+/// `zap`
+pub const ZAP: &str = "\u{E1B4}";
+/// `funnel`
+pub const FILTER: &str = "\u{E0DC}";
+/// `toggle-right`
+pub const TOGGLE: &str = "\u{E18C}";
+/// `paint-bucket`
+pub const PAINT: &str = "\u{E2E6}";
+/// `text-cursor-input`
+pub const RENAME: &str = "\u{E265}";
+/// `log-in`
+pub const LOGIN: &str = "\u{E10D}";
 
 /// (nom, glyphe) de toutes les icônes, pour les tests.
 pub const ALL: &[(&str, &str)] = &[
@@ -263,4 +319,32 @@ pub const ALL: &[(&str, &str)] = &[
     ("CHEVRON_LEFT", CHEVRON_LEFT),
     ("CHEVRON_RIGHT", CHEVRON_RIGHT),
     ("BACK", BACK),
+    ("NEXT", NEXT),
+    ("ROWS", ROWS),
+    ("LAYOUT_LIST", LAYOUT_LIST),
+    ("SORT_NAME", SORT_NAME),
+    ("CALENDAR_DAYS", CALENDAR_DAYS),
+    ("DRIVE", DRIVE),
+    ("FOLDER_TREE", FOLDER_TREE),
+    ("MOVE", MOVE),
+    ("MERGE", MERGE),
+    ("SPLIT", SPLIT),
+    ("TITLE", TITLE),
+    ("CORNERS", CORNERS),
+    ("OPACITY", OPACITY),
+    ("GLASS", GLASS),
+    ("ICON_SIZE", ICON_SIZE),
+    ("POINTER", POINTER),
+    ("HAND", HAND),
+    ("DONE", DONE),
+    ("ALERT", ALERT),
+    ("CLIPBOARD", CLIPBOARD),
+    ("TAG", TAG),
+    ("INBOX", INBOX),
+    ("ZAP", ZAP),
+    ("FILTER", FILTER),
+    ("TOGGLE", TOGGLE),
+    ("PAINT", PAINT),
+    ("RENAME", RENAME),
+    ("LOGIN", LOGIN),
 ];
