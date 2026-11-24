@@ -9,7 +9,9 @@
 //! - `--desktop` : les surfaces posées sur le bureau (boîtes, icônes, widgets), lancé
 //!   et surveillé par l'agent ;
 //! - `--manager` : la fenêtre principale (réglages), à la demande ;
-//! - `--restore-finder` : rend les icônes du Finder si Tidy les a masquées.
+//! - `--create-box` : crée une boîte sous la souris (menu contextuel du bureau) ;
+//! - `--restore-desktop` (ou `--restore-finder`) : rend les icônes du bureau ;
+//! - `--uninstall` : retire tout ce que Tidy a posé hors de son dossier de données.
 
 mod agent;
 mod desktop;
@@ -30,7 +32,10 @@ Usage :
   tidy --background       lance l'agent sans ouvrir la fenêtre principale
   tidy --manager [page]   ouvre la fenêtre principale (page : options, diagnostic…)
   tidy --desktop          surfaces du bureau (lancé par l'agent)
-  tidy --restore-finder   rend les icônes du Finder si Tidy les a masquées
+  tidy --create-box       crée une boîte sous la souris (menu du bureau)
+  tidy --toggle-desktop   masque ou montre le bureau (boîtes et icônes)
+  tidy --restore-desktop  rend les icônes du bureau si Tidy les a masquées
+  tidy --uninstall        retire Tidy du système (menu du bureau, démarrage, icônes)
   tidy --quit             arrête l'agent
   tidy --version
 
@@ -43,6 +48,9 @@ enum Role {
     Desktop,
     Manager,
     RestoreFinder,
+    CreateBox,
+    ToggleDesktop,
+    Uninstall,
     Quit,
     Version,
     Help,
@@ -54,7 +62,10 @@ fn parse_role(arg: Option<&str>) -> Option<Role> {
         Some("--background") => Role::Agent { background: true },
         Some("--desktop") => Role::Desktop,
         Some("--manager") => Role::Manager,
-        Some("--restore-finder") => Role::RestoreFinder,
+        Some("--restore-finder" | "--restore-desktop") => Role::RestoreFinder,
+        Some("--create-box") => Role::CreateBox,
+        Some("--toggle-desktop") => Role::ToggleDesktop,
+        Some("--uninstall") => Role::Uninstall,
         Some("--quit") => Role::Quit,
         Some("--version" | "-V") => Role::Version,
         Some("--help" | "-h") => Role::Help,
@@ -91,12 +102,56 @@ fn main() -> Result<()> {
         }
         Role::RestoreFinder => {
             let marker = store.finder_marker_path();
-            if tidy_platform::finder::restore_icons(&tidy_platform::finder::SystemFinder, &marker)?
-            {
-                println!("Icônes du Finder rétablies.");
-            } else {
-                println!("Tidy n'avait pas masqué les icônes du Finder : rien à faire.");
+            let finder = tidy_platform::finder::restore_icons(
+                &tidy_platform::finder::SystemFinder,
+                &marker,
+            )?;
+            let platform = tidy_platform::current();
+            let explorer = platform.desktop_icons_hidden();
+            if explorer {
+                platform.set_desktop_icons_hidden(false)?;
             }
+            if finder || explorer {
+                println!("Icônes du bureau rétablies.");
+            } else {
+                println!("Tidy n'avait pas masqué les icônes du bureau : rien à faire.");
+            }
+            Ok(())
+        }
+        Role::ToggleDesktop => match ipc::request(&store, &Request::ToggleDesktop) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                eprintln!("Tidy ne tourne pas.");
+                std::process::exit(1);
+            }
+        },
+        Role::CreateBox => match ipc::request(&store, &Request::CreateBox) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                eprintln!("Tidy ne tourne pas : lance-le d'abord.");
+                std::process::exit(1);
+            }
+        },
+        Role::Uninstall => {
+            // Tout ce que Tidy a posé hors de son dossier de données.
+            let _ = ipc::request(&store, &Request::Quit);
+            let platform = tidy_platform::current();
+            if let Err(e) = platform.set_desktop_menu(None) {
+                eprintln!("menu du bureau : {e:#}");
+            }
+            if let Err(e) = platform.set_login_item(false) {
+                eprintln!("ouverture de session : {e:#}");
+            }
+            if platform.desktop_icons_hidden() {
+                let _ = platform.set_desktop_icons_hidden(false);
+            }
+            let marker = store.finder_marker_path();
+            let _ =
+                tidy_platform::finder::restore_icons(&tidy_platform::finder::SystemFinder, &marker);
+            println!(
+                "Tidy est retiré du système. Tes réglages restent dans {} (à supprimer à la main si tu veux).",
+                store.root().display()
+            );
             Ok(())
         }
         Role::Quit => {

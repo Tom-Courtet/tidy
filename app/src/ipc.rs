@@ -36,6 +36,8 @@ pub enum Request {
     ReloadDesktop,
     /// Basculer la visibilité du bureau.
     ToggleDesktop,
+    /// Créer une boîte sous la souris (menu du bureau, `tidy --create-box`).
+    CreateBox,
     /// Rendre les icônes du Finder (bouton du diagnostic) : repasse en mode superposé.
     RestoreFinder,
     /// Le processus du bureau a posé ses surfaces : en mode géré, l'agent peut masquer

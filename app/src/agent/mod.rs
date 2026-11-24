@@ -19,8 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use tidy_core::events::{Event, EventBus};
-use tidy_core::settings::{DesktopMode, QuickAccessMode};
+use tidy_core::settings::{DesktopMode, QuickAccessMode, QuickHideScope};
 use tidy_core::{Settings, Store};
+use tidy_ui::t;
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -95,6 +96,10 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     Ok(Response::Ok)
                 }
                 Request::ToggleDesktop => send(UserEvent::ToggleDesktop),
+                Request::CreateBox => {
+                    bus.publish(Event::CreateBox { at: None });
+                    Ok(Response::Ok)
+                }
                 Request::RestoreFinder => send(UserEvent::RestoreFinder),
                 Request::DesktopReady => {
                     supervisor.send(Command::DesktopReady);
@@ -160,6 +165,28 @@ impl App {
     fn start(&mut self) {
         self.start_tray();
         self.register_hotkeys();
+        let platform = tidy_platform::current();
+        // Icônes laissées masquées par un arrêt brutal précédent.
+        if platform.desktop_icons_hidden() {
+            let _ = platform.set_desktop_icons_hidden(false);
+        }
+        self.install_desktop_menu();
+        if self.settings.quick_actions.double_click_to_hide {
+            let proxy = std::sync::Mutex::new(self.proxy.clone());
+            let watching = platform.watch_desktop_double_click(Box::new(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(UserEvent::ToggleDesktop);
+                }
+            }));
+            log::info!(
+                "double-clic sur le bureau : {}",
+                if watching {
+                    "surveillé"
+                } else {
+                    "indisponible"
+                }
+            );
+        }
         let proxy = self.proxy.clone();
         tidy_platform::on_reopen(move || {
             let _ = proxy.send_event(UserEvent::OpenManager);
@@ -168,6 +195,15 @@ impl App {
             self.open_manager();
         }
         log::info!("agent prêt (données : {})", self.store.root().display());
+    }
+
+    /// Entrée « Créer une boîte » du menu contextuel du bureau (Windows).
+    fn install_desktop_menu(&self) {
+        let label =
+            (self.settings.desktop_mode != DesktopMode::Off).then(|| t!("desktop.menu_create_box"));
+        if let Err(e) = tidy_platform::current().set_desktop_menu(label) {
+            log::warn!("menu du bureau : {e:#}");
+        }
     }
 
     fn register_hotkeys(&mut self) {
@@ -225,6 +261,10 @@ impl App {
             log::warn!("ouverture de session : {e:#}");
         }
         self.bus.publish(Event::SettingsChanged);
+        if old.language != self.settings.language || old.desktop_mode != self.settings.desktop_mode
+        {
+            self.install_desktop_menu();
+        }
         if old.language != self.settings.language {
             // Les libellés du menu changent : on recrée l'icône.
             self.tray = None;
@@ -264,6 +304,12 @@ impl App {
             *h
         };
         self.bus.publish(Event::DesktopVisibility { hidden });
+        // Les icônes du système aussi, si les réglages le demandent (Windows).
+        if self.settings.quick_actions.hide_scope == QuickHideScope::Everything
+            && let Err(e) = tidy_platform::current().set_desktop_icons_hidden(hidden)
+        {
+            log::debug!("icônes du bureau : {e:#}");
+        }
         self.refresh_tray();
     }
 
@@ -271,6 +317,10 @@ impl App {
         log::info!("arrêt demandé");
         self.bus.publish(Event::Shutdown);
         self.supervisor.shutdown();
+        let platform = tidy_platform::current();
+        if platform.desktop_icons_hidden() {
+            let _ = platform.set_desktop_icons_hidden(false);
+        }
         // Raccourcis et icône retirés avant de rendre la main.
         self.hotkeys = None;
         self.tray = None;

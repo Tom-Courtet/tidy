@@ -55,6 +55,10 @@ pub enum Event {
     OpenSearch,
     /// Ramener la fenêtre principale devant (elle est déjà ouverte).
     FocusManager,
+    /// Créer une boîte (menu du bureau, `tidy --create-box`), à `at` ou sous la souris.
+    CreateBox {
+        at: Option<crate::geometry::Point>,
+    },
     /// L'agent s'arrête : les autres processus se ferment.
     Shutdown,
 }

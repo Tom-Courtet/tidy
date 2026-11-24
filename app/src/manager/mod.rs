@@ -149,8 +149,6 @@ pub struct Manager {
     events: Receiver<Event>,
     pub status: Option<Status>,
     status_at: Option<Instant>,
-    /// Modale d'accord pour le mode géré ouverte.
-    pub asking_consent: bool,
     /// Dernière erreur à montrer.
     pub error: Option<String>,
 }
@@ -167,7 +165,6 @@ impl Manager {
             events,
             status: None,
             status_at: None,
-            asking_consent: false,
             error: None,
         }
     }
@@ -244,9 +241,13 @@ impl Manager {
 }
 
 impl eframe::App for Manager {
+    /// Tourne même quand la fenêtre est cachée derrière d'autres.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_events(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.handle_events(&ctx);
         self.refresh_status(&ctx);
         egui::Panel::top("en-tête")
             .frame(
@@ -272,6 +273,5 @@ impl eframe::App for Manager {
                     .auto_shrink(false)
                     .show(ui, |ui| pages::show(self, ui));
             });
-        pages::modals(self, &ctx);
     }
 }

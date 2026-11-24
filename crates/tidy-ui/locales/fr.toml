@@ -85,8 +85,12 @@ screens = "Écrans"
 
 [desktop]
 demo_box = "Boîte de démonstration"
-demo_hint = "Glisse-moi par la barre de titre."
+demo_hint = "Glisse-moi par la barre de titre, tire mes bords pour me redimensionner."
 empty_box = "Glisse des éléments ici"
+new_box = "Nouvelle boîte"
+menu_new_box = "Nouvelle boîte"
+menu_delete_box = "Supprimer la boîte"
+menu_create_box = "Créer une boîte (Tidy)"
 hidden_notice = "Bureau masqué : double-clic pour le retrouver."
 
 [category]

@@ -83,8 +83,12 @@ screens = "Displays"
 
 [desktop]
 demo_box = "Demo box"
-demo_hint = "Drag me by the title bar."
+demo_hint = "Drag me by the title bar, pull my edges to resize me."
 empty_box = "Drop items here"
+new_box = "New box"
+menu_new_box = "New box"
+menu_delete_box = "Delete box"
+menu_create_box = "Create a box (Tidy)"
 hidden_notice = "Desktop hidden: double-click to bring it back."
 
 [category]

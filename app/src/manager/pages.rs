@@ -124,16 +124,14 @@ fn options(m: &mut Manager, ui: &mut egui::Ui) {
         );
         let current = m.settings.effective_desktop_mode();
         ui.horizontal_wrapped(|ui| {
-            for mode in [DesktopMode::Off, DesktopMode::Overlay, DesktopMode::Managed] {
+            // Le mode géré (macOS) attend que Tidy dessine les icônes hors boîte
+            // (ADR 011) : il n'est plus proposé pour l'instant.
+            for mode in [DesktopMode::Off, DesktopMode::Overlay] {
                 if widgets::choice(ui, current == mode, mode_label(mode)).clicked()
                     && current != mode
                 {
-                    if mode == DesktopMode::Managed && !m.settings.managed_consent {
-                        m.asking_consent = true;
-                    } else {
-                        m.settings.desktop_mode = mode;
-                        m.save();
-                    }
+                    m.settings.desktop_mode = mode;
+                    m.save();
                 }
             }
         });
@@ -255,31 +253,6 @@ fn diagnostic(m: &mut Manager, ui: &mut egui::Ui) {
             ));
         }
     });
-}
-
-/// Modales (accord pour le mode géré).
-pub fn modals(m: &mut Manager, ctx: &egui::Context) {
-    if !m.asking_consent {
-        return;
-    }
-    let body = format!("{}\n\n{}", t!("consent.body"), t!("consent.rescue"));
-    match widgets::confirm(
-        ctx,
-        "accord-mode-géré",
-        t!("consent.title"),
-        &body,
-        t!("consent.accept"),
-        false,
-    ) {
-        Some(true) => {
-            m.asking_consent = false;
-            m.settings.managed_consent = true;
-            m.settings.desktop_mode = DesktopMode::Managed;
-            m.save();
-        }
-        Some(false) => m.asking_consent = false,
-        None => {}
-    }
 }
 
 /// Chemin en police fixe, coupé s'il est trop long (entier au survol).

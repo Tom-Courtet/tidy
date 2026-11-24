@@ -1,31 +1,31 @@
-//! Processus du bureau (`tidy --desktop`) : une surface transparente par écran, posée
-//! juste au-dessus des icônes du bureau, sur laquelle Tidy dessine boîtes, icônes et
-//! widgets.
+//! Processus du bureau (`tidy --desktop`) : **une fenêtre par boîte** (ADR 011), posée
+//! juste au-dessus des icônes du bureau, sous toutes les applis.
 //!
-//! Vague 0 : prototype. Une boîte de démonstration, déplaçable d'un écran à l'autre,
-//! dont la position est mémorisée par configuration d'écrans. Le reste (vraies boîtes,
-//! icônes, glisser-déposer…) arrive en vague 1 sur cette même base.
-//!
-//! - **Mode superposé** : la surface ne prend les clics que sur les boîtes ; ailleurs,
-//!   ils passent aux icônes du Finder ([`tidy_platform::DesktopPlatform::set_interactive_regions`]).
-//! - **Mode géré** : la surface prend tout le bureau ; un double-clic sur une zone vide
-//!   masque ou montre le bureau.
+//! - Une fenêtre « hôte » de 1×1 point, invisible, porte la boucle d'eframe ; chaque
+//!   boîte est une fenêtre secondaire (viewport immédiat) à sa taille.
+//! - Les événements de l'agent sont traités dans [`eframe::App::logic`], qui tourne
+//!   même quand toutes les fenêtres sont cachées derrière des applis ; un changement
+//!   de structure (boîte créée, bureau montré) demande une image malgré tout
+//!   (`RequestPaintWhileHidden`).
+//! - Le système déplace et redimensionne les fenêtres ; la position finale est relue et
+//!   enregistrée par configuration d'écrans.
 //!
 //! Le processus suit l'agent : s'il disparaît (fin de l'abonnement aux événements), le
-//! bureau rend les icônes du Finder s'il le faut, puis s'arrête.
+//! bureau rend les icônes du système s'il le faut, puis s'arrête.
 
-mod surface;
+mod boxwin;
 
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use egui::ViewportId;
+use egui::{ViewportBuilder, ViewportCommand, ViewportId};
 use tidy_core::events::Event;
-use tidy_core::geometry::Rect;
-use tidy_core::model::DeskBox;
+use tidy_core::geometry::{Point, Rect};
+use tidy_core::model::{BoxId, DeskBox};
 use tidy_core::screen::Screen;
-use tidy_core::settings::DesktopMode;
 use tidy_core::{DesktopState, Settings, Store};
 use tidy_platform::SurfaceLevel;
 use tidy_platform::finder::{self, SystemFinder};
@@ -33,8 +33,10 @@ use tidy_ui::t;
 
 use crate::ipc::{self, Request};
 
-/// Taille de la boîte de démonstration, en points.
-const DEMO_SIZE: [f32; 2] = [320.0, 220.0];
+/// Taille d'une nouvelle boîte, en points.
+const NEW_BOX_SIZE: [f32; 2] = [320.0, 220.0];
+/// Délai après le dernier mouvement d'une fenêtre avant d'enregistrer sa position.
+const SAVE_DELAY: Duration = Duration::from_millis(400);
 
 pub fn run(store: Store) -> Result<()> {
     let settings: Settings = store.load();
@@ -42,17 +44,14 @@ pub fn run(store: Store) -> Result<()> {
     let screens = tidy_platform::current().screens();
     anyhow::ensure!(!screens.is_empty(), "aucun écran");
 
-    // Suivre l'agent. S'il disparaît : rendre le Finder et s'arrêter. Chaque événement
-    // réveille l'interface (qui, sinon, ne se redessine que sur une entrée).
+    // Suivre l'agent. Chaque événement réveille la boucle (`logic`).
     let (tx, events) = mpsc::channel();
-    let end_store = store.clone();
     let ctx_cell: Arc<OnceLock<egui::Context>> = Arc::default();
     let wake = Arc::clone(&ctx_cell);
+    let end_store = store.clone();
     if let Err(e) = ipc::subscribe(
         &store,
         move |event| {
-            // Arrêt immédiat : une fenêtre cachée ne verrait pas l'événement avant
-            // d'être redessinée. Tout est déjà enregistré.
             if event == Event::Shutdown {
                 std::process::exit(0);
             }
@@ -62,19 +61,26 @@ pub fn run(store: Store) -> Result<()> {
             }
         },
         move || {
-            log::warn!("l'agent a disparu : le bureau s'arrête");
-            let _ = finder::restore_icons(&SystemFinder, &end_store.finder_marker_path());
+            log::warn!("l'agent a disparu : le bureau rend les icônes et s'arrête");
+            restore_system_icons(&end_store);
             std::process::exit(0);
         },
     ) {
-        // Lancé à la main, sans agent : on continue (prototype, essais).
+        // Lancé à la main, sans agent : on continue (essais).
         log::warn!("pas d'agent ({e:#}) : bureau autonome");
     }
 
-    let root = &screens[0];
-    let viewport = surface::builder(root, &surface::title(0));
+    let host = host_rect(&screens);
     let native = eframe::NativeOptions {
-        viewport,
+        viewport: ViewportBuilder::default()
+            .with_title("Tidy · hôte du bureau")
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_has_shadow(false)
+            .with_taskbar(false)
+            .with_position([host.x, host.y])
+            .with_inner_size([host.width, host.height]),
         persist_window: false,
         event_loop_builder: Some(Box::new(|builder| {
             #[cfg(target_os = "macos")]
@@ -90,16 +96,11 @@ pub fn run(store: Store) -> Result<()> {
         })),
         ..Default::default()
     };
-    let root_frame = root.frame;
     eframe::run_native(
         "Tidy",
         native,
         Box::new(move |cc| {
-            tidy_platform::current().make_desktop_surface(
-                cc,
-                root_frame,
-                SurfaceLevel::DesktopIcons,
-            );
+            tidy_platform::current().make_desktop_surface(cc, host, SurfaceLevel::DesktopIcons);
             tidy_ui::theme::apply(&cc.egui_ctx);
             let _ = ctx_cell.set(cc.egui_ctx.clone());
             Ok(Box::new(Desktop::new(store, settings, screens, events)))
@@ -108,25 +109,46 @@ pub fn run(store: Store) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("bureau : {e}"))
 }
 
-/// Une surface (un écran).
-struct SurfaceState {
-    screen: Screen,
+/// Rend les icônes du bureau du système si Tidy les avait masquées.
+pub fn restore_system_icons(store: &Store) {
+    let platform = tidy_platform::current();
+    if platform.desktop_icons_hidden() {
+        let _ = platform.set_desktop_icons_hidden(false);
+    }
+    let _ = finder::restore_icons(&SystemFinder, &store.finder_marker_path());
+}
+
+/// Fenêtre hôte : 1×1 point, au coin du cadre utile de l'écran principal.
+fn host_rect(screens: &[Screen]) -> Rect {
+    let v = screens
+        .iter()
+        .find(|s| s.primary)
+        .unwrap_or(&screens[0])
+        .visible_frame;
+    Rect::new(v.x, v.y, 1.0, 1.0)
+}
+
+/// État d'une fenêtre de boîte.
+struct BoxWindow {
     viewport: ViewportId,
     title: String,
-    /// Fenêtre native réglée (niveau, Spaces…).
+    /// Cadre de création (constant, pour qu'egui ne replace pas la fenêtre).
+    spawn: Rect,
+    /// Cadre actuel, relu sur la fenêtre.
+    current: Rect,
+    /// Fenêtre native réglée (niveau, bureau…).
     placed: bool,
-    /// Dernières régions interactives envoyées (mode superposé).
-    regions: Option<Option<Vec<Rect>>>,
+    /// Déplacée ou redimensionnée depuis : position à enregistrer.
+    moved_at: Option<Instant>,
 }
 
 struct Desktop {
     store: Store,
     settings: Settings,
     state: DesktopState,
-    surfaces: Vec<SurfaceState>,
+    screens: Vec<Screen>,
+    windows: HashMap<BoxId, BoxWindow>,
     events: Receiver<Event>,
-    /// Boîte de démonstration : position globale courante.
-    demo: Rect,
     hidden: bool,
     ready_sent: bool,
 }
@@ -142,145 +164,173 @@ impl Desktop {
         if state.boxes.is_empty() {
             state.boxes.push(DeskBox::new(t!("desktop.demo_box")));
         }
-        let demo = state.boxes[0]
-            .placement
-            .resolve(&screens)
-            .map(|(_, r)| r)
-            .unwrap_or_else(|| default_demo_rect(&screens[0]));
-        let surfaces = screens
-            .into_iter()
-            .enumerate()
-            .map(|(i, screen)| SurfaceState {
-                screen,
-                viewport: if i == 0 {
-                    ViewportId::ROOT
-                } else {
-                    ViewportId::from_hash_of(("tidy-surface", i))
-                },
-                title: surface::title(i),
-                placed: i == 0,
-                regions: None,
-            })
-            .collect();
-        Self {
+        let mut desktop = Self {
             store,
-            hidden: false,
             settings,
             state,
-            surfaces,
+            screens,
+            windows: HashMap::new(),
             events,
-            demo,
+            hidden: false,
             ready_sent: false,
-        }
+        };
+        desktop.sync_windows();
+        desktop
     }
 
-    fn mode(&self) -> DesktopMode {
-        self.settings.effective_desktop_mode()
-    }
-
-    fn handle_events(&mut self, ctx: &egui::Context) {
-        while let Ok(event) = self.events.try_recv() {
-            match event {
-                Event::DesktopVisibility { hidden } => self.hidden = hidden,
-                Event::SettingsChanged => {
-                    self.settings = self.store.load();
-                    crate::lang::apply(self.settings.language);
-                    for s in &mut self.surfaces {
-                        s.regions = None;
-                    }
+    /// Une fenêtre par boîte : crée celles qui manquent, oublie celles des boîtes
+    /// supprimées.
+    fn sync_windows(&mut self) {
+        let screens = &self.screens;
+        for (i, b) in self.state.boxes.iter().enumerate() {
+            self.windows.entry(b.id).or_insert_with(|| {
+                let rect = b
+                    .placement
+                    .resolve(screens)
+                    .map(|(_, r)| r)
+                    .unwrap_or_else(|| default_rect(screens, i));
+                let short: String = b.id.0.simple().to_string().chars().take(8).collect();
+                BoxWindow {
+                    viewport: ViewportId::from_hash_of(("tidy-boîte", b.id)),
+                    title: format!("Tidy · boîte {short}"),
+                    spawn: rect,
+                    current: rect,
+                    placed: false,
+                    moved_at: None,
                 }
-                Event::Shutdown => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                _ => {}
-            }
+            });
         }
+        let ids: Vec<BoxId> = self.state.boxes.iter().map(|b| b.id).collect();
+        self.windows.retain(|id, _| ids.contains(id));
     }
 
-    /// Enregistre la position de la boîte de démonstration après un déplacement.
-    fn remember_demo(&mut self) {
-        let screens: Vec<Screen> = self.surfaces.iter().map(|s| s.screen.clone()).collect();
-        let center = tidy_core::geometry::Point {
-            x: self.demo.x + self.demo.width / 2.0,
-            y: self.demo.y + self.demo.height / 2.0,
-        };
-        let Some(screen) = screens
-            .iter()
-            .find(|s| s.frame.contains(center))
-            .or_else(|| screens.first())
-        else {
-            return;
-        };
-        self.demo = self.demo.clamped_to(&screen.visible_frame);
-        self.state.boxes[0]
-            .placement
-            .remember(&screens, screen, self.demo);
+    fn save_state(&self) {
         if let Err(e) = self.store.save(&self.state) {
             log::error!("disposition non enregistrée : {e:#}");
         }
     }
 
-    /// Régions interactives d'une surface (mode superposé) : les boîtes visibles.
-    fn regions_for(&self, screen: &Screen) -> Option<Vec<Rect>> {
-        match self.mode() {
-            DesktopMode::Managed => None,
-            _ if self.hidden => Some(Vec::new()),
-            _ => Some(
-                [self.demo]
-                    .into_iter()
-                    .filter(|r| r.intersects(&screen.frame))
-                    .collect(),
-            ),
-        }
-    }
-
-    fn sync_regions(&mut self, index: usize) {
-        let wanted = self.regions_for(&self.surfaces[index].screen);
-        let surface = &mut self.surfaces[index];
-        if surface.regions.as_ref() != Some(&wanted) {
-            tidy_platform::current().set_interactive_regions(&surface.title, wanted.clone());
-            surface.regions = Some(wanted);
-        }
-    }
-
-    fn surface_ui(&mut self, ui: &mut egui::Ui, index: usize) {
-        let origin = self.surfaces[index].screen.frame.origin();
-        let out = surface::draw(
-            ui,
-            surface::Frame {
-                origin,
-                demo: self.demo,
-                hidden: self.hidden,
-                managed: self.mode() == DesktopMode::Managed,
-                title: self.state.boxes[0].name.clone(),
-            },
+    fn create_box(&mut self, at: Option<Point>) {
+        let at = at.unwrap_or_else(|| tidy_platform::current().mouse_location());
+        let mut b = DeskBox::new(t!("desktop.new_box"));
+        let rect = Rect::new(
+            at.x - NEW_BOX_SIZE[0] / 2.0,
+            at.y - boxwin::TITLE_HEIGHT / 2.0,
+            NEW_BOX_SIZE[0],
+            NEW_BOX_SIZE[1],
         );
-        if let Some(delta) = out.dragged {
-            self.demo.x += delta.x;
-            self.demo.y += delta.y;
-        }
-        if out.drag_stopped {
-            self.remember_demo();
-        }
-        if out.background_double_clicked {
-            // Passe par l'agent, qui tient l'état et prévient tout le monde.
-            std::thread::spawn({
-                let store = self.store.clone();
-                move || {
-                    let _ = ipc::request(&store, &Request::ToggleDesktop);
+        let screen = screen_at(&self.screens, at);
+        let rect = rect.clamped_to(&screen.visible_frame);
+        b.placement.remember(&self.screens, &screen, rect);
+        self.state.boxes.push(b);
+        self.sync_windows();
+        self.save_state();
+    }
+
+    fn delete_box(&mut self, id: BoxId) {
+        // Aucun fichier touché : les éléments de la boîte redeviennent des icônes.
+        self.state.remove_box(id);
+        self.sync_windows();
+        self.save_state();
+    }
+
+    /// Événements de l'agent. Rend `true` si l'affichage doit changer.
+    fn handle_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok(event) = self.events.try_recv() {
+            match event {
+                Event::DesktopVisibility { hidden } => self.hidden = hidden,
+                Event::CreateBox { at } => {
+                    self.hidden = false;
+                    self.create_box(at);
                 }
-            });
+                Event::SettingsChanged => {
+                    self.settings = self.store.load();
+                    crate::lang::apply(self.settings.language);
+                }
+                Event::DesktopChanged => {
+                    self.state = self.store.load();
+                    self.sync_windows();
+                }
+                _ => continue,
+            }
+            changed = true;
         }
-        self.sync_regions(index);
+        changed
+    }
+
+    /// Relit le cadre de la fenêtre ; enregistre la position une fois stable.
+    fn track_window(&mut self, id: BoxId, outer: Option<egui::Rect>) {
+        let Some(win) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if let Some(r) = outer {
+            let rect = Rect::new(r.min.x, r.min.y, r.width(), r.height());
+            let moved = (rect.x - win.current.x).abs() > 0.5
+                || (rect.y - win.current.y).abs() > 0.5
+                || (rect.width - win.current.width).abs() > 0.5
+                || (rect.height - win.current.height).abs() > 0.5;
+            if moved && win.placed {
+                win.current = rect;
+                win.moved_at = Some(Instant::now());
+            }
+        }
+        if win.moved_at.is_some_and(|t| t.elapsed() >= SAVE_DELAY) {
+            win.moved_at = None;
+            let rect = win.current;
+            self.screens = tidy_platform::current().screens();
+            let center = Point {
+                x: rect.x + rect.width / 2.0,
+                y: rect.y + rect.height / 2.0,
+            };
+            let screen = screen_at(&self.screens, center);
+            if let Some(b) = self.state.find_box_mut(id) {
+                b.placement.remember(&self.screens, &screen, rect);
+            }
+            self.save_state();
+        }
     }
 }
 
-fn default_demo_rect(screen: &Screen) -> Rect {
-    let v = screen.visible_frame;
+/// Écran qui contient `p`, sinon l'écran principal.
+fn screen_at(screens: &[Screen], p: Point) -> Screen {
+    screens
+        .iter()
+        .find(|s| s.frame.contains(p))
+        .or_else(|| screens.iter().find(|s| s.primary))
+        .unwrap_or(&screens[0])
+        .clone()
+}
+
+/// Place par défaut de la `i`-ième boîte : en haut à droite de l'écran principal, en
+/// cascade.
+fn default_rect(screens: &[Screen], i: usize) -> Rect {
+    let v = screens
+        .iter()
+        .find(|s| s.primary)
+        .unwrap_or(&screens[0])
+        .visible_frame;
+    let offset = 30.0 * i as f32;
     Rect::new(
-        v.right() - DEMO_SIZE[0] - 40.0,
-        v.y + 40.0,
-        DEMO_SIZE[0],
-        DEMO_SIZE[1],
+        v.right() - NEW_BOX_SIZE[0] - 40.0 - offset,
+        v.y + 40.0 + offset,
+        NEW_BOX_SIZE[0],
+        NEW_BOX_SIZE[1],
     )
+    .clamped_to(&v)
+}
+
+fn box_builder(win: &BoxWindow) -> ViewportBuilder {
+    ViewportBuilder::default()
+        .with_title(&win.title)
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_resizable(true)
+        .with_has_shadow(false)
+        .with_taskbar(false)
+        .with_position([win.spawn.x, win.spawn.y])
+        .with_inner_size([win.spawn.width, win.spawn.height])
+        .with_min_inner_size(boxwin::MIN_SIZE)
 }
 
 impl eframe::App for Desktop {
@@ -288,25 +338,66 @@ impl eframe::App for Desktop {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.handle_events() {
+            // Les nouvelles fenêtres n'existent qu'après un passage dans `ui`, même si
+            // tout est caché derrière des applis.
+            ctx.send_viewport_cmd_to(ViewportId::ROOT, ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.handle_events(&ctx);
-        self.surface_ui(ui, 0);
-        for i in 1..self.surfaces.len() {
-            let builder = surface::builder(&self.surfaces[i].screen, &self.surfaces[i].title);
-            let viewport = self.surfaces[i].viewport;
-            ctx.show_viewport_immediate(viewport, builder, |ui, _class| self.surface_ui(ui, i));
-            if !self.surfaces[i].placed {
-                let s = &self.surfaces[i];
-                self.surfaces[i].placed = tidy_platform::current().make_desktop_surface_titled(
-                    &s.title,
-                    s.screen.frame,
+        let mut new_box = false;
+        let mut delete = None;
+        let boxes: Vec<DeskBox> = self.state.boxes.clone();
+        for (i, b) in boxes.iter().enumerate() {
+            let Some(win) = self.windows.get(&b.id) else {
+                continue;
+            };
+            // Masquer le bureau rend les fenêtres invisibles sans les détruire : elles
+            // gardent leur place et leurs réglages système.
+            let builder = box_builder(win).with_visible(!self.hidden);
+            let viewport = win.viewport;
+            let demo = i == 0 && b.name == t!("desktop.demo_box");
+            let (out, outer) = ctx.show_viewport_immediate(viewport, builder, |ui, _class| {
+                let out = boxwin::draw(ui, b, demo);
+                let outer = ui.ctx().input(|i| i.viewport().outer_rect);
+                (out, outer)
+            });
+            new_box |= out.new_box;
+            if out.delete {
+                delete = Some(b.id);
+            }
+            if let Some(win) = self.windows.get_mut(&b.id)
+                && !win.placed
+            {
+                win.placed = tidy_platform::current().make_desktop_surface_titled(
+                    &win.title,
+                    win.current,
                     SurfaceLevel::DesktopIcons,
                 );
                 ctx.request_repaint();
             }
+            self.track_window(b.id, outer);
+            if self
+                .windows
+                .get(&b.id)
+                .is_some_and(|w| w.moved_at.is_some())
+            {
+                ctx.request_repaint_after(SAVE_DELAY);
+            }
         }
-        if !self.ready_sent && self.surfaces.iter().all(|s| s.placed) {
+        if new_box {
+            self.create_box(None);
+            ctx.request_repaint();
+        }
+        if let Some(id) = delete {
+            self.delete_box(id);
+            ctx.request_repaint();
+        }
+        if !self.ready_sent && !self.hidden && self.windows.values().all(|w| w.placed) {
             self.ready_sent = true;
             let store = self.store.clone();
             std::thread::spawn(move || {
