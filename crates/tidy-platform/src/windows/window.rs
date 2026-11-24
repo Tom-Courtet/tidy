@@ -22,9 +22,9 @@ use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, FindWindowW, GWL_EXSTYLE, GWLP_HWNDPARENT, GetWindowLongPtrW,
-    GetWindowTextW, HWND_BOTTOM, IsWindowVisible, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW,
-    WS_EX_TOOLWINDOW,
+    GetWindowTextW, HWND_BOTTOM, HWND_TOPMOST, IsWindowVisible, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    WINDOWPOS, WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 use windows_sys::core::BOOL;
 
@@ -84,16 +84,17 @@ fn owner_mode() -> bool {
     std::env::var("TIDY_WIN_DESKTOP").as_deref() != Ok("bottom")
 }
 
-/// Sous-classe : toute remontée dans la pile devient « tout en bas ».
+/// Sous-classe : toute remontée dans la pile devient « tout en bas », sauf pendant un
+/// accès rapide (`raised` ≠ 0, voir [`raise`]).
 unsafe extern "system" fn keep_at_bottom(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
     _id: usize,
-    _data: usize,
+    raised: usize,
 ) -> LRESULT {
-    if msg == WM_WINDOWPOSCHANGING && lparam != 0 {
+    if msg == WM_WINDOWPOSCHANGING && lparam != 0 && raised == 0 {
         // SAFETY: pour WM_WINDOWPOSCHANGING, `lparam` pointe sur la WINDOWPOS que le
         // système nous laisse modifier.
         let pos = unsafe { &mut *(lparam as *mut WINDOWPOS) };
@@ -103,6 +104,46 @@ unsafe extern "system" fn keep_at_bottom(
     }
     // SAFETY: on rend la main à la procédure d'origine, avec les mêmes arguments.
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// Accès rapide : passe la fenêtre au-dessus de toutes les applis et au premier plan
+/// (`raised`), ou la remet tout en bas. Le « toujours en bas » est suspendu entre les
+/// deux ; le propriétaire `Progman` reste (une fenêtre possédée peut passer au premier
+/// plan sans entraîner son propriétaire).
+///
+/// Attention : [`make_surface`] remet la fenêtre en bas ; ne pas l'appeler pendant un
+/// accès rapide.
+pub fn raise(hwnd: HWND, raised: bool) {
+    // SAFETY: `hwnd` est une fenêtre vivante de ce thread (trouvée par son titre) ; la
+    // sous-classe est la même que celle de `make_surface`, seule sa donnée change.
+    unsafe {
+        SetWindowSubclass(hwnd, Some(keep_at_bottom), SUBCLASS_ID, usize::from(raised));
+        if raised {
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            // Peut être refusé si l'utilisateur travaille dans une autre appli : la
+            // fenêtre reste alors visible au-dessus, sans le clavier.
+            SetForegroundWindow(hwnd);
+        } else {
+            // HWND_BOTTOM retire aussi l'état « au-dessus de tout ».
+            SetWindowPos(
+                hwnd,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
 }
 
 pub fn make_surface(hwnd: HWND, frame: Rect, level: SurfaceLevel) {

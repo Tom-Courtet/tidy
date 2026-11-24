@@ -7,7 +7,10 @@
 
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSApplication, NSView, NSWindow, NSWindowCollectionBehavior};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationOptions, NSFloatingWindowLevel, NSRunningApplication,
+    NSView, NSWindow, NSWindowCollectionBehavior,
+};
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tidy_core::geometry::Rect;
@@ -62,22 +65,48 @@ pub fn make_surface(window: &dyn HasWindowHandle, frame: Rect, surface: SurfaceL
     }
 }
 
+/// La plus récente des fenêtres visibles de ce titre (une fenêtre fermée peut rester un
+/// instant dans la liste).
+pub fn find_titled(mtm: MainThreadMarker, title: &str) -> Option<Retained<NSWindow>> {
+    NSApplication::sharedApplication(mtm)
+        .windows()
+        .iter()
+        .filter(|w| w.isVisible() && w.title().to_string() == title)
+        .last()
+}
+
 pub fn make_surface_titled(title: &str, frame: Rect, surface: SurfaceLevel) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
     };
-    let windows = NSApplication::sharedApplication(mtm).windows();
-    // La plus récente des fenêtres visibles de ce titre (une fenêtre fermée peut rester
-    // un instant dans la liste).
-    match windows
-        .iter()
-        .filter(|w| w.isVisible() && w.title().to_string() == title)
-        .last()
-    {
+    match find_titled(mtm, title) {
         Some(win) => {
             configure(&win, frame, surface);
             true
         }
         None => false,
+    }
+}
+
+/// Accès rapide : fenêtre flottante au-dessus des applis (`raised`), ou rendue au
+/// niveau du bureau.
+pub fn raise(title: &str, raised: bool) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        log::warn!("accès rapide : pas sur le thread principal");
+        return;
+    };
+    let Some(win) = find_titled(mtm, title) else {
+        log::debug!("accès rapide : fenêtre « {title} » introuvable");
+        return;
+    };
+    if raised {
+        win.setLevel(NSFloatingWindowLevel);
+        win.orderFrontRegardless();
+        win.makeKeyWindow();
+        NSRunningApplication::currentApplication()
+            .activateWithOptions(NSApplicationActivationOptions::empty());
+    } else {
+        win.setLevel(level(SurfaceLevel::DesktopIcons));
+        win.orderFrontRegardless();
     }
 }

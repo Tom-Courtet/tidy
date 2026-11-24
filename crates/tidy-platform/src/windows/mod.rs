@@ -2,18 +2,22 @@
 //!
 //! - [`screens`] : écrans, identifiant stable, échelle par écran ;
 //! - [`window`] : fenêtres posées sur le bureau (Win+D, ordre des fenêtres) ;
-//! - [`desktop`] : icônes de l'Explorateur, double-clic sur le bureau ;
+//! - [`desktop`] : icônes de l'Explorateur, double-clic et rectangle sur le bureau ;
 //! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
+//! - [`shell`] : icônes des fichiers, menu contextuel et glisser-déposer du Shell ;
+//! - [`watch`] : changements d'écrans ;
 //! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
 
 mod desktop;
 mod icons;
 mod registry;
 mod screens;
+mod shell;
+mod watch;
 mod window;
 
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use raw_window_handle::HasWindowHandle;
@@ -27,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::BOOL;
 
-use crate::{Callback, DesktopPlatform, LoginState, SurfaceLevel};
+use crate::{Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SurfaceLevel};
 
 pub struct WindowsPlatform;
 
@@ -86,6 +90,39 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn desktop_icon_positions(&self) -> Option<&'static dyn tidy_core::icon_stash::DesktopIcons> {
         Some(&icons::ExplorerIcons)
+    }
+
+    fn file_icon(&self, path: &Path, size_px: u32, thumbnail: bool) -> Option<IconImage> {
+        shell::file_icon(path, size_px, thumbnail)
+            .inspect_err(|e| log::debug!("icône de {} : {e:#}", path.display()))
+            .ok()
+    }
+
+    fn show_file_menu(&self, window_title: &str, paths: &[PathBuf]) -> Result<bool> {
+        shell::show_menu(window_title, paths)
+    }
+
+    fn start_file_drag(&self, window_title: &str, paths: &[PathBuf]) -> Result<bool> {
+        shell::start_drag(window_title, paths)
+    }
+
+    fn trash(&self, paths: &[PathBuf]) -> Result<()> {
+        crate::recycle::move_to_trash(paths)
+    }
+
+    fn watch_screens(&self, on_change: Callback) -> bool {
+        watch::watch_screens(on_change)
+    }
+
+    fn watch_desktop_drag(&self, on_rect: RectCallback) -> bool {
+        desktop::watch_drag(on_rect)
+    }
+
+    fn raise_desktop_surface(&self, title: &str, raised: bool) {
+        match window::find_titled(title) {
+            Some(hwnd) => window::raise(hwnd, raised),
+            None => log::debug!("accès rapide : fenêtre « {title} » introuvable"),
+        }
     }
 
     fn open(&self, path: &Path) -> Result<()> {
