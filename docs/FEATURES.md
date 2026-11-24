@@ -23,23 +23,24 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 
 | Fonction | Statut | Vague | Notes |
 |---|---|---|---|
-| Fenêtre posée sur le bureau (niveau, Spaces, Mission Control) | partiel | 0 | prototype macOS ; une fenêtre par boîte (ADR 011) et Windows : vague 0 bis |
-| Prototype Windows (Win+D, DPI, Explorateur) | à faire | 0 bis | ADR 001, 011 |
+| Une fenêtre par boîte, posée sur le bureau | partiel | 0 bis | macOS vérifié ; Windows : propriétaire `Progman` + toujours en bas (à tester sur PC) |
+| Prototype Windows (Win+D, DPI, Explorateur) | partiel | 0 bis | compilé et testé en CI ; tests manuels sur PC à faire |
 | CI GitHub : tests Windows et macOS, artefact `tidy.exe` | fait | 0 bis | |
 | Mode superposé (clics traversants hors des boîtes) | partiel | 0 | moniteurs d'événements, sans minuteur |
 | Mode géré (icônes du Finder masquées) | partiel | 0 | macOS ; plus le mode par défaut visé (ADR 011) |
-| Icônes de l'Explorateur : tout masquer / montrer | à faire | 0 bis | sans injection |
-| Icônes rangées masquées du bureau système | à faire | 0 bis | étude, décision commune |
+| Icônes de l'Explorateur : tout masquer / montrer | partiel | 0 bis | `ShowWindow` sur la liste du bureau, sans injection ; à tester |
+| Icônes rangées masquées du bureau système | à faire | 1 | étude dans PLAN § 1 bis, décision commune |
 | Sécurité du Finder (plantages, arrêt, secours) | fait | 0 | 3 plantages/min → retour des icônes ; `--restore-finder` |
 | Positions par configuration d'écrans | partiel | 0 | modèle et tests ; changements d'écran à chaud : vague 1 |
-| Double-clic pour masquer | partiel | 0 | mode géré seulement ; mode superposé : vague 1 |
+| Double-clic pour masquer | partiel | 0 bis | Windows : crochet souris bas niveau + sélection vide ; macOS : à faire |
 
 ## Boîtes
 
 | Fonction | Statut | Vague | Notes |
 |---|---|---|---|
-| Création manuelle, déplacer, redimensionner, renommer, supprimer | à faire | 1 | suppression = éléments rendus au bureau (modèle prêt) |
-| Création en dessinant un rectangle | à faire | 1 | |
+| Création manuelle, déplacer, redimensionner, renommer, supprimer | partiel | 0 bis | créer, déplacer, redimensionner, supprimer : faits ; renommer : vague 1 |
+| Création en dessinant un rectangle | à faire | 1 | surcouche temporaire (ADR 011) |
+| Menu du bureau « Créer une boîte » | partiel | 0 bis | Windows : verbe du registre (Win 11 : « Afficher plus d'options ») ; `tidy --create-box` |
 | Glisser-déposer (bureau, boîtes, Finder) | à faire | 1 | |
 | Icônes système, miniatures, ouverture, menu contextuel | à faire | 1 | |
 | Rangement automatique, règles par catégorie, priorités, fourre-tout | partiel | 1 | moteur de règles et catégories (annexe A) faits |

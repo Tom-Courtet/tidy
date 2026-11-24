@@ -1,43 +1,76 @@
 # Tests manuels
 
-Ce qui touche au vrai bureau ne se teste pas automatiquement. Toujours avec des données jetables, sauf mention contraire :
+Ce qui touche au vrai bureau ne se teste pas automatiquement.
+
+## Windows (cible prioritaire)
+
+### Récupérer l'exe
+Onglet **Actions** du dépôt GitHub → dernier run « build » vert → artefact **tidy-windows** → `tidy.exe` (aucune installation). Exe non signé : SmartScreen affiche « Windows a protégé votre ordinateur » → *Informations complémentaires* → *Exécuter quand même*.
+
+Pour essayer sans toucher à tes vrais réglages, dans PowerShell :
+
+```powershell
+$env:TIDY_DATA_DIR = "$env:TEMP\tidy-essai"; .\tidy.exe
+```
+
+Journaux : `<données>\logs\` (Options > Diagnostic > Ouvrir les journaux). Plus de détails : `$env:TIDY_LOG = "debug"`.
+
+### Vague 0 bis : prototype Windows
+**Lancement**
+- [ ] L'icône Tidy apparaît dans la zone de notification ; aucune entrée dans la barre des tâches ni dans Alt+Tab pour les boîtes.
+- [ ] La fenêtre principale s'ouvre ; relancer `tidy.exe` la ramène devant au lieu d'en ouvrir une deuxième.
+
+**Boîtes posées sur le bureau** (le point le plus important)
+- [ ] La « Boîte de démonstration » est en haut à droite de l'écran principal, **sous** les fenêtres des applis, **au-dessus** du fond d'écran et des icônes.
+- [ ] Cliquer dans une boîte ne la fait **pas** passer devant les applis ouvertes.
+- [ ] **Win+D** (Afficher le bureau) : les boîtes **restent visibles** ; Win+D à nouveau : les applis reviennent, les boîtes restent dessous.
+- [ ] Clic sur le coin en bas à droite de la barre des tâches (Afficher le bureau) : même résultat.
+- [ ] Bureaux virtuels (Win+Ctrl+→) : noter si les boîtes suivent ou non.
+- [ ] Si Win+D cache les boîtes : quitter Tidy, relancer avec `$env:TIDY_WIN_DESKTOP = "bottom"` et refaire l'essai (variante sans propriétaire), puis me dire laquelle marche.
+
+**Déplacer, redimensionner, créer, supprimer**
+- [ ] La boîte se déplace par sa barre de titre, se redimensionne par ses bords et ses coins.
+- [ ] Après un déplacement, quitter puis relancer Tidy : la boîte revient au même endroit.
+- [ ] Clic droit sur la barre de titre → « Nouvelle boîte » : une boîte vide apparaît sous la souris.
+- [ ] Clic droit sur le bureau → *Afficher plus d'options* (Windows 11) → **« Créer une boîte (Tidy) »** : une boîte apparaît sous la souris.
+- [ ] Clic droit sur une boîte → « Supprimer la boîte » : elle disparaît (aucun fichier touché).
+
+**Masquer le bureau**
+- [ ] **Double-clic sur une zone vide du bureau** : les boîtes **et** les icônes de Windows disparaissent ; second double-clic : tout revient.
+- [ ] Double-clic sur une **icône** : l'élément s'ouvre normalement, rien ne se masque.
+- [ ] **Ctrl+Alt+H** : même bascule que le double-clic.
+- [ ] Icônes masquées, puis « Quitter Tidy » : les icônes reviennent.
+
+**Écrans**
+- [ ] Deux écrans à échelles différentes (ex. 100 % et 150 %) : une boîte déplacée sur le second garde une taille correcte et revient au bon endroit après redémarrage.
+- [ ] Débrancher le second écran puis le rebrancher : la boîte retrouve sa place sur lui.
+- [ ] Options > Diagnostic : la liste des écrans est juste (nom, taille, échelle).
+
+**Robustesse**
+- [ ] Gestionnaire des tâches → terminer le processus `tidy.exe` qui porte les boîtes (le plus gros) : les boîtes reviennent en moins d'une seconde.
+- [ ] Terminer l'agent (le plus petit `tidy.exe`) : les boîtes disparaissent et les icônes de Windows sont visibles.
+- [ ] `tidy.exe --uninstall` : l'entrée du menu du bureau disparaît, le démarrage avec la session est retiré.
+
+**Mesures**
+- [ ] Gestionnaire des tâches, colonne Mémoire : agent et bureau avec 1 puis 5 boîtes.
+- [ ] Processeur au repos ≈ 0 %.
+
+## macOS
+
+Avec des données jetables :
 
 ```sh
 export TIDY_DATA_DIR=$(mktemp -d)
 cargo build && target/debug/tidy
 ```
 
-## Vague 0 : prototype du bureau
-
-### Mode superposé (défaut, sans toucher au Finder)
+### Vague 0 bis
 - [ ] L'icône Tidy apparaît dans la barre des menus, pas dans le Dock ni dans ⌘Tab.
-- [ ] La fenêtre principale s'ouvre au lancement ; « Ouvrir Tidy… » la ramène devant si elle est déjà ouverte.
-- [ ] La « Boîte de démonstration » est en haut à droite de l'écran principal, **sous** les fenêtres des applis, **au-dessus** du fond d'écran.
-- [ ] Les icônes du Finder restent cliquables partout sauf sous la boîte.
-- [ ] La boîte se déplace par sa barre de titre, y compris vers un écran externe ; sa position survit à un redémarrage de Tidy.
-- [ ] Débrancher l'écran externe puis le rebrancher : la boîte retrouve la position qu'elle avait avec lui.
-- [ ] Changer de Space (bureau virtuel) : la boîte est présente sur chacun.
-- [ ] Mission Control (F3) et « Afficher le bureau » (F11 ou geste) : la boîte ne s'envole pas.
-- [ ] ⌃⌥H masque puis montre la boîte ; le menu « Masquer le bureau » aussi.
-- [ ] Options > Langue > English : le menu de la barre des menus et la fenêtre passent en anglais.
-
-### Robustesse
-- [ ] `kill -9` du processus `tidy --desktop` : il revient en moins d'une seconde.
-- [ ] Trois `kill -9` en moins d'une minute : il ne revient plus (journal : « n'insiste pas »).
+- [ ] La boîte de démonstration est sous les fenêtres des applis, au-dessus du fond d'écran ; présente sur chaque Space ; immobile pendant Mission Control et « Afficher le bureau ».
+- [ ] Déplacer et redimensionner la boîte ; la position survit à un redémarrage ; elle est mémorisée par configuration d'écrans.
+- [ ] Clic droit sur le titre → « Nouvelle boîte » / « Supprimer la boîte ».
+- [ ] ⌃⌥H et `tidy --toggle-desktop` masquent puis montrent les boîtes (les icônes du Finder restent : pas de masquage rapide sous macOS).
+- [ ] `kill -9` du processus `tidy --desktop` : il revient ; trois fois en une minute : il ne revient plus.
 - [ ] `kill -9` de l'agent : le bureau disparaît aussi.
-- [ ] `tidy --quit` : tout s'arrête.
 
-### Mode géré (⚠ modifie le Finder ; seulement avec ton accord)
-Avant : noter `defaults read com.apple.finder CreateDesktop` (souvent « does not exist »).
-- [ ] Options > Mode du bureau > Géré : la modale d'accord s'affiche ; « Annuler » ne change rien.
-- [ ] « Gérer le bureau » : le Finder redémarre, ses icônes du bureau disparaissent, la boîte reste.
-- [ ] Double-clic sur une zone vide du bureau : la boîte disparaît ; second double-clic : elle revient.
-- [ ] `kill -9` de l'agent : le bureau s'arrête **et les icônes du Finder reviennent**.
-- [ ] Relancer Tidy, repasser en géré, puis « Quitter Tidy » : les icônes reviennent.
-- [ ] Repasser en géré, puis Diagnostic > « Rendre les icônes du Finder » : retour en superposé, icônes revenues.
-- [ ] Après chaque essai, `defaults read com.apple.finder CreateDesktop` redonne la valeur notée au départ.
-- [ ] Secours : `tidy --restore-finder` rend les icônes si un essai a mal tourné.
-
-### Mesures (build release)
-- [ ] `footprint <pid>` de l'agent et du bureau, avec 1 puis 2 écrans (voir README).
-- [ ] Processeur au repos : `top -pid <pid>` ≈ 0 %.
+Vérifié sur la machine de développement (24/11/2026) : niveaux des fenêtres, création par `--create-box`, masquer/montrer, retour après plantage, 0 % de processeur au repos, 52 Mo (debug) pour le bureau avec une boîte, 58 Mo avec deux.

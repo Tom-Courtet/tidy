@@ -6,9 +6,10 @@ Organiseur de bureau léger et personnalisable pour **Windows** (10 et 11) et ma
 sur le bureau, rangement automatique, widgets, recherche rapide, fonds d'écran. De la
 même famille que Snappy, Tappy et Soundy.
 
-> **État : vague 0 (socle et prototype macOS).** L'agent, la fenêtre principale et une boîte
-> de démonstration sur le bureau fonctionnent sous macOS. Prochaine étape : le prototype
-> Windows (vague 0 bis), puis les vraies boîtes. Plan : [PLAN.md](PLAN.md), parité :
+> **État : vague 0 bis (prototype Windows et macOS).** Agent, fenêtre principale et boîtes
+> posées sur le bureau (une fenêtre par boîte : créer, déplacer, redimensionner, supprimer,
+> masquer). Vérifié sous macOS ; sous Windows, compilé et testé en CI, essais réels en
+> cours. Prochaine étape : les vraies boîtes (vague 1). Plan : [PLAN.md](PLAN.md), parité :
 > [docs/FEATURES.md](docs/FEATURES.md).
 >
 > **Windows** : chaque push sur `main` compile `tidy.exe` (onglet *Actions* du dépôt,
@@ -40,7 +41,7 @@ Un seul exécutable, plusieurs processus :
 | Processus | Rôle | Mémoire (release, MacBook Air, écran Retina 1470×956 pt) |
 |---|---|---|
 | `tidy` | l'**agent** : barre des menus, raccourcis, surveillance | 14 Mo, 0 % de processeur au repos |
-| `tidy --desktop` | les surfaces du bureau, relancées par l'agent si besoin | 161 Mo avec une surface plein écran (Retina) ; 51 Mo avec une fenêtre par boîte (mesure de comparaison) |
+| `tidy --desktop` | une fenêtre par boîte, relancées par l'agent si besoin | 52 Mo avec une boîte, 58 Mo avec deux (au lieu de 161 Mo avec une surface plein écran) |
 | `tidy --manager` | la fenêtre principale | ≈ 110 Mo, rendus à la fermeture |
 
 Binaire : 4,5 Mo ; `Tidy.app` : 4,4 Mo. D'où le choix d'**une fenêtre par boîte**, comme
@@ -61,7 +62,10 @@ Essai sans toucher à tes données : `TIDY_DATA_DIR=$(mktemp -d) target/release/
 tidy                     # lance l'agent (et ouvre la fenêtre principale)
 tidy --background        # lance l'agent seul (ouverture de session)
 tidy --manager [page]    # fenêtre principale (options, diagnostic…)
-tidy --restore-finder    # rend les icônes du Finder si Tidy les a masquées
+tidy --create-box        # crée une boîte sous la souris (menu du bureau sous Windows)
+tidy --toggle-desktop    # masque ou montre le bureau
+tidy --restore-desktop   # rend les icônes du bureau si Tidy les a masquées
+tidy --uninstall         # retire Tidy du système (menu du bureau, démarrage, icônes)
 tidy --quit              # arrête Tidy
 ```
 
