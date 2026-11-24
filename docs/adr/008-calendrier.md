@@ -9,3 +9,8 @@ Le widget Calendrier lit le calendrier de macOS par EventKit : les comptes Googl
 ## Conséquences
 
 - Autorisation « Calendriers » de macOS à demander avec un écran d'explication.
+
+
+## À revoir pour Windows (ADR 001)
+
+EventKit est propre à macOS. Sous Windows : lecture d'une URL ICS (Google et Outlook en fournissent une) en premier, puis OAuth Google et Microsoft Graph si besoin, derrière `CalendarProvider`.

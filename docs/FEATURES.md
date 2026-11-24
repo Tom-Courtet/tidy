@@ -23,9 +23,13 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 
 | Fonction | Statut | Vague | Notes |
 |---|---|---|---|
-| Fenêtre posée sur le bureau (niveau, Spaces, Mission Control) | partiel | 0 | prototype validé techniquement ; à tester sur la machine (Spaces, écran externe) |
+| Fenêtre posée sur le bureau (niveau, Spaces, Mission Control) | partiel | 0 | prototype macOS ; une fenêtre par boîte (ADR 011) et Windows : vague 0 bis |
+| Prototype Windows (Win+D, DPI, Explorateur) | à faire | 0 bis | ADR 001, 011 |
+| CI GitHub : tests Windows et macOS, artefact `tidy.exe` | fait | 0 bis | |
 | Mode superposé (clics traversants hors des boîtes) | partiel | 0 | moniteurs d'événements, sans minuteur |
-| Mode géré (icônes du Finder masquées) | partiel | 0 | accord explicite, témoin, retour garanti ; dessin des icônes : vague 1 |
+| Mode géré (icônes du Finder masquées) | partiel | 0 | macOS ; plus le mode par défaut visé (ADR 011) |
+| Icônes de l'Explorateur : tout masquer / montrer | à faire | 0 bis | sans injection |
+| Icônes rangées masquées du bureau système | à faire | 0 bis | étude, décision commune |
 | Sécurité du Finder (plantages, arrêt, secours) | fait | 0 | 3 plantages/min → retour des icônes ; `--restore-finder` |
 | Positions par configuration d'écrans | partiel | 0 | modèle et tests ; changements d'écran à chaud : vague 1 |
 | Double-clic pour masquer | partiel | 0 | mode géré seulement ; mode superposé : vague 1 |

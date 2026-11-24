@@ -2,13 +2,17 @@
 
 # Tidy
 
-Organiseur de bureau léger et personnalisable pour macOS, 100 % Rust (egui) : boîtes
+Organiseur de bureau léger et personnalisable pour **Windows** (10 et 11) et macOS, 100 % Rust (egui) : boîtes
 sur le bureau, rangement automatique, widgets, recherche rapide, fonds d'écran. De la
 même famille que Snappy, Tappy et Soundy.
 
-> **État : vague 0 (socle et prototype).** L'agent, la fenêtre principale et une boîte de
-> démonstration sur le bureau fonctionnent. Les vraies boîtes arrivent en vague 1. Plan :
-> [PLAN.md](PLAN.md), parité : [docs/FEATURES.md](docs/FEATURES.md).
+> **État : vague 0 (socle et prototype macOS).** L'agent, la fenêtre principale et une boîte
+> de démonstration sur le bureau fonctionnent sous macOS. Prochaine étape : le prototype
+> Windows (vague 0 bis), puis les vraies boîtes. Plan : [PLAN.md](PLAN.md), parité :
+> [docs/FEATURES.md](docs/FEATURES.md).
+>
+> **Windows** : chaque push sur `main` compile `tidy.exe` (onglet *Actions* du dépôt,
+> artefact `tidy-windows`).
 
 ## Ce qui marche déjà
 
@@ -39,8 +43,8 @@ Un seul exécutable, plusieurs processus :
 | `tidy --desktop` | les surfaces du bureau, relancées par l'agent si besoin | 161 Mo avec une surface plein écran (Retina) ; 51 Mo avec une fenêtre par boîte (mesure de comparaison) |
 | `tidy --manager` | la fenêtre principale | ≈ 110 Mo, rendus à la fermeture |
 
-Binaire : 4,5 Mo ; `Tidy.app` : 4,4 Mo. Le choix entre surface plein écran et fenêtre
-par boîte est à trancher (voir [ADR 003](docs/adr/003-mode-bureau.md)).
+Binaire : 4,5 Mo ; `Tidy.app` : 4,4 Mo. D'où le choix d'**une fenêtre par boîte**, comme
+l'original ([ADR 011](docs/adr/011-fenetre-par-boite.md)).
 
 ## Construire
 

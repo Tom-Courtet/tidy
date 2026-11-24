@@ -14,6 +14,23 @@
 7. **Capture d'écran** : Tidy ne la refait pas, puisque Snappy existe. La tuile « Capture » des outils rapides lance Snappy (D5).
 8. **Méthode** : je pose seul un socle commun (vague 0), avec les contrats (traits, IPC, modèle). Ensuite viennent des vagues de sous-agents en parallèle, chacun dans sa copie du dépôt (worktree) et sur ses propres crates. Je fusionne et je vérifie. Tu valides à la fin de chaque vague. Commits en français, au format Conventional Commits, sans mention de Claude.
 
+## 1 bis. Révision du 24/11/2026 : Windows en priorité
+
+Après la vague 0, deux changements (ADR 001 et 011) :
+
+1. **Tidy vise d'abord Windows** (usage réel du propriétaire), macOS suit. Développement sur Mac, cible Windows vérifiée par `cargo xwin check` et par une **CI GitHub** qui compile, teste et publie `tidy.exe` à chaque push. Chaque vague se termine par des tests manuels **sur le PC Windows**.
+2. **Une fenêtre par boîte et par widget**, comme l'original (manuel officiel : boîtes = panneaux séparés, icônes hors boîte laissées à l'Explorateur). La surface plein écran coûtait 161 Mo ; une fenêtre de boîte, 51 Mo pour tout le processus. Une surcouche plein écran temporaire sert seulement pour dessiner une boîte ou glisser entre boîtes.
+
+### Vague 0 bis · Prototype Windows (moi, seul)
+- CI GitHub Actions : fmt, clippy, tests sur Windows et macOS ; artefact `tidy.exe`.
+- `tidy-platform/windows` : écrans (identifiant stable, DPI par écran), fenêtre de boîte au niveau du bureau qui **résiste à Win+D** et reste sous les applis, démarrage avec la session (registre, repris de Snappy), ouverture et « afficher dans l'Explorateur », langue du système, icône de la zone de notification.
+- Icônes de l'Explorateur : masquer et montrer toutes les icônes (double-clic pour masquer) sans injection ; étude de la façon de masquer seulement les icônes rangées dans une boîte (décision à prendre ensemble).
+- Menu contextuel du bureau « Tidy > Créer une boîte » par une entrée de registre (sous Windows 11 : « Afficher plus d'options »).
+- Prototype du bureau passé à une fenêtre par boîte (Windows et macOS).
+- 🛑 **Validation sur ton PC** : Win+D, multi-écrans, DPI mélangés, plantage simulé, mémoire.
+
+Les vagues 1 à 3 restent valables ; leurs lots implémentent Windows **et** macOS derrière `DesktopPlatform`, Windows d'abord. Les décisions macOS à revoir pour Windows sont notées dans les ADR 006, 007 et 008.
+
 ## 2. Décisions à trancher
 
 | # | Question | Options | Ma recommandation |

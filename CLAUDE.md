@@ -1,6 +1,6 @@
 # Tidy : consignes pour Claude Code
 
-Organiseur de bureau léger et personnalisable pour macOS (Windows plus tard), en Rust. Réimplémentation fonctionnelle d'iTop Easy Desktop, sans rien reprendre de son identité. Plan et vagues de travail : `PLAN.md`. Parité : `docs/FEATURES.md`. Décisions : `docs/adr/`.
+Organiseur de bureau léger et personnalisable, en Rust. **Cible prioritaire : Windows 10/11** (usage réel du propriétaire), macOS en parallèle (ADR 001). Une fenêtre par boîte et par widget (ADR 011). Réimplémentation fonctionnelle d'iTop Easy Desktop, sans rien reprendre de son identité. Plan et vagues de travail : `PLAN.md`. Parité : `docs/FEATURES.md`. Décisions : `docs/adr/`.
 
 Projets frères dont Tidy reprend la stack et la DA : `../snappy`, `../tappy`, `../Soundboard` (crate `soundy`).
 
@@ -11,9 +11,11 @@ cargo build                                   # tout le workspace (binaire : tar
 cargo test --workspace                        # tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
-cargo xwin check --target x86_64-pc-windows-msvc   # la cible Windows doit compiler
+cargo xwin clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings   # la cible Windows doit compiler sans avertissement
 sh tools/bundle_macos.sh                      # dist/Tidy.app (release)
 ```
+
+CI : `.github/workflows/build.yml` (tests Windows et macOS, artefact `tidy.exe`). Le propriétaire teste l'exe sur son PC : chaque vague fournit une liste de tests manuels Windows.
 
 Essais sans toucher aux vraies données : `TIDY_DATA_DIR=$(mktemp -d) target/debug/tidy`.
 Niveau des journaux : `TIDY_LOG=debug`. Journaux : `<données>/logs/`.

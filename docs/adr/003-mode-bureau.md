@@ -1,6 +1,6 @@
 # ADR 003 · Mode du bureau : superposé par défaut, géré avec accord
 
-Statut : Acceptée ; forme des fenêtres à trancher (24/11/2026)
+Statut : Acceptée ; forme des fenêtres tranchée par l'ADR 011 (24/11/2026)
 
 ## Décision
 
@@ -14,5 +14,5 @@ Sécurité du Finder : un fichier témoin (`finder-hidden.json`) garde la valeur
 
 ## Conséquences
 
-- À trancher à la validation de la vague 0 : garder la surface plein écran (simple, ≈ 160 Mo par écran Retina) ou passer à **une fenêtre par boîte et par widget** (≈ 50 Mo de base + quelques Mo par boîte), avec une surcouche plein écran temporaire pour dessiner une boîte ou glisser entre boîtes.
+- Tranché : **une fenêtre par boîte et par widget** (ADR 011). La surface plein écran n'est plus utilisée qu'en surcouche temporaire.
 - Reste à faire : retour du réglage du Finder à la fermeture de session (SIGTERM) si Tidy ne démarre pas avec la session.
