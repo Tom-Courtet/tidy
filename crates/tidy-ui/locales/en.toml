@@ -1,0 +1,104 @@
+# User interface strings in English. Same keys as fr.toml (checked by a test).
+
+[common]
+ok = "OK"
+cancel = "Cancel"
+close = "Close"
+delete = "Delete"
+rename = "Rename"
+open = "Open"
+save = "Save"
+reset = "Reset"
+enabled = "On"
+disabled = "Off"
+coming_soon = "Coming soon"
+coming_soon_hint = "This page arrives in a later wave."
+none = "None"
+
+[tray]
+open = "Open Tidy…"
+boxes_enabled = "Boxes enabled"
+hide_desktop = "Hide desktop"
+show_desktop = "Show desktop"
+search = "Search…"
+quit = "Quit Tidy"
+tooltip = "Tidy"
+
+[manager]
+title = "Tidy"
+subtitle = "Desktop organizer"
+home = "Home"
+boxes = "Boxes"
+organization = "Organization"
+quick_actions = "Quick actions"
+layouts = "Layouts"
+wallpapers = "Wallpapers"
+widgets = "Widgets"
+search = "Search"
+options = "Options"
+diagnostic = "Diagnostics"
+agent_running = "Agent running"
+agent_stopped = "Agent stopped"
+
+[home]
+welcome = "Welcome to Tidy"
+intro = "Sort your desktop into boxes, keep your widgets at hand, find any file in a few keystrokes."
+desktop_mode = "Desktop mode: {mode}"
+
+[options]
+language = "Language"
+language_system = "System language"
+launch_at_login = "Open Tidy at login"
+launch_at_login_approval = "Allow it in System Settings > General > Login Items."
+desktop_mode = "Desktop mode"
+mode_off = "Off"
+mode_overlay = "Overlay"
+mode_managed = "Managed"
+mode_off_hint = "Tidy draws nothing on the desktop."
+mode_overlay_hint = "Boxes float above the Finder icons, which stay visible."
+mode_managed_hint = "Tidy hides the Finder icons and draws the whole desktop itself. Your files don't move."
+hotkeys = "Global shortcuts"
+hotkey_search = "Search"
+hotkey_toggle_desktop = "Hide or show the desktop"
+hotkey_quick_access = "Quick access to boxes"
+hotkey_main_window = "Main window"
+
+[consent]
+title = "Let Tidy manage the desktop?"
+body = "Tidy will hide the Finder icons and draw your desktop's contents itself. No file is moved or deleted. Finder will restart (its windows reopen). The icons come back as soon as you quit Tidy, turn boxes off, or if anything goes wrong."
+accept = "Manage the desktop"
+rescue = "If needed: tidy --restore-finder"
+
+[diagnostic]
+version = "Version"
+data_dir = "Data folder"
+logs_dir = "Logs"
+open_data = "Open data folder"
+open_logs = "Open logs"
+finder_icons = "Finder icons"
+finder_visible = "visible"
+finder_hidden = "hidden by Tidy"
+restore_finder = "Bring back Finder icons"
+screens = "Displays"
+
+[desktop]
+demo_box = "Demo box"
+demo_hint = "Drag me by the title bar."
+empty_box = "Drop items here"
+hidden_notice = "Desktop hidden: double-click to bring it back."
+
+[category]
+application = "Applications"
+folder = "Folders"
+document = "Documents"
+image = "Images"
+video = "Videos"
+music = "Music"
+archive = "Archives"
+executable = "Installers and scripts"
+web_link = "Web links"
+game = "Games"
+other = "Other"
+
+[error]
+agent_unreachable = "Tidy's agent is not responding."

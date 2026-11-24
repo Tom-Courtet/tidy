@@ -1,0 +1,106 @@
+# Textes de l'interface en français (langue de référence).
+# Clés : `section.clé`. Variables : `{nom}`, remplacées par `t!("clé", nom = valeur)`.
+# Toute clé ajoutée ici doit l'être aussi dans en.toml (vérifié par un test).
+
+[common]
+ok = "OK"
+cancel = "Annuler"
+close = "Fermer"
+delete = "Supprimer"
+rename = "Renommer"
+open = "Ouvrir"
+save = "Enregistrer"
+reset = "Réinitialiser"
+enabled = "Activé"
+disabled = "Désactivé"
+coming_soon = "Bientôt disponible"
+coming_soon_hint = "Cette page arrive dans une prochaine vague."
+none = "Aucun"
+
+[tray]
+open = "Ouvrir Tidy…"
+boxes_enabled = "Boîtes activées"
+hide_desktop = "Masquer le bureau"
+show_desktop = "Afficher le bureau"
+search = "Rechercher…"
+quit = "Quitter Tidy"
+tooltip = "Tidy"
+
+[manager]
+title = "Tidy"
+subtitle = "Organiseur de bureau"
+home = "Accueil"
+boxes = "Boîtes"
+organization = "Rangement"
+quick_actions = "Actions rapides"
+layouts = "Dispositions"
+wallpapers = "Fonds d'écran"
+widgets = "Widgets"
+search = "Recherche"
+options = "Options"
+diagnostic = "Diagnostic"
+agent_running = "Agent actif"
+agent_stopped = "Agent arrêté"
+
+[home]
+welcome = "Bienvenue dans Tidy"
+intro = "Range ton bureau dans des boîtes, garde tes widgets sous la main, retrouve n'importe quel fichier en quelques lettres."
+desktop_mode = "Mode du bureau : {mode}"
+
+[options]
+language = "Langue"
+language_system = "Langue du système"
+launch_at_login = "Lancer Tidy à l'ouverture de session"
+launch_at_login_approval = "À autoriser dans Réglages Système > Général > Ouverture."
+desktop_mode = "Mode du bureau"
+mode_off = "Désactivé"
+mode_overlay = "Superposé"
+mode_managed = "Géré"
+mode_off_hint = "Tidy ne dessine rien sur le bureau."
+mode_overlay_hint = "Les boîtes flottent au-dessus des icônes du Finder, qui restent visibles."
+mode_managed_hint = "Tidy masque les icônes du Finder et dessine lui-même tout le bureau. Tes fichiers ne bougent pas."
+hotkeys = "Raccourcis globaux"
+hotkey_search = "Recherche"
+hotkey_toggle_desktop = "Masquer ou afficher le bureau"
+hotkey_quick_access = "Accès rapide aux boîtes"
+hotkey_main_window = "Fenêtre principale"
+
+[consent]
+title = "Laisser Tidy gérer le bureau ?"
+body = "Tidy va masquer les icônes du Finder et dessiner lui-même le contenu de ton bureau. Aucun fichier n'est déplacé ni supprimé. Le Finder sera relancé (ses fenêtres se rouvrent). Les icônes reviennent dès que tu quittes Tidy, que tu désactives les boîtes ou en cas de problème."
+accept = "Gérer le bureau"
+rescue = "En cas de besoin : tidy --restore-finder"
+
+[diagnostic]
+version = "Version"
+data_dir = "Dossier de données"
+logs_dir = "Journaux"
+open_data = "Ouvrir le dossier de données"
+open_logs = "Ouvrir les journaux"
+finder_icons = "Icônes du Finder"
+finder_visible = "visibles"
+finder_hidden = "masquées par Tidy"
+restore_finder = "Rendre les icônes du Finder"
+screens = "Écrans"
+
+[desktop]
+demo_box = "Boîte de démonstration"
+demo_hint = "Glisse-moi par la barre de titre."
+empty_box = "Glisse des éléments ici"
+hidden_notice = "Bureau masqué : double-clic pour le retrouver."
+
+[category]
+application = "Applications"
+folder = "Dossiers"
+document = "Documents"
+image = "Images"
+video = "Vidéos"
+music = "Musique"
+archive = "Archives"
+executable = "Installeurs et scripts"
+web_link = "Liens web"
+game = "Jeux"
+other = "Autres"
+
+[error]
+agent_unreachable = "L'agent de Tidy ne répond pas."
