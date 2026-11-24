@@ -11,6 +11,8 @@ publish.workspace = true
 egui.workspace = true
 log.workspace = true
 toml.workspace = true
+# Format et lecture des raccourcis globaux (saisie d'un raccourci, `hotkey.rs`).
+global-hotkey.workspace = true
 
 [lints]
 workspace = true

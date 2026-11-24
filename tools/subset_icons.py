@@ -119,6 +119,35 @@ ICONS = {
     "CHEVRON_LEFT": "chevron-left",
     "CHEVRON_RIGHT": "chevron-right",
     "BACK": "arrow-left",
+    # Vague 1 (fenêtre principale, boîtes, rangement).
+    "NEXT": "arrow-right",
+    "ROWS": "rows-3",
+    "LAYOUT_LIST": "layout-list",
+    "SORT_NAME": "arrow-down-a-z",
+    "CALENDAR_DAYS": "calendar-days",
+    "DRIVE": "hard-drive",
+    "FOLDER_TREE": "folder-tree",
+    "MOVE": "move",
+    "MERGE": "merge",
+    "SPLIT": "split",
+    "TITLE": "type",
+    "CORNERS": "square-round-corner",
+    "OPACITY": "blend",
+    "GLASS": "droplets",
+    "ICON_SIZE": "scaling",
+    "POINTER": "mouse-pointer-2",
+    "HAND": "hand",
+    "DONE": "circle-check",
+    "ALERT": "circle-alert",
+    "CLIPBOARD": "clipboard-copy",
+    "TAG": "tag",
+    "INBOX": "inbox",
+    "ZAP": "zap",
+    "FILTER": "funnel",
+    "TOGGLE": "toggle-right",
+    "PAINT": "paint-bucket",
+    "RENAME": "text-cursor-input",
+    "LOGIN": "log-in",
 }
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -127,7 +156,7 @@ ICONS_RS = ROOT / "crates" / "tidy-ui" / "src" / "icons.rs"
 
 
 def write_icons_rs(codepoints: dict) -> None:
-    """Régénère src/ui/icons.rs à partir de ICONS (même ordre, mêmes points de code)."""
+    """Régénère crates/tidy-ui/src/icons.rs à partir de ICONS (même ordre, mêmes points de code)."""
     lines = [
         "//! Icônes de l'interface : glyphes de la police Lucide (ISC/MIT), réduite aux icônes",
         "//! listées ici (`assets/fonts/Lucide.ttf`, régénérée par `tools/subset_icons.py`,",
@@ -135,7 +164,6 @@ def write_icons_rs(codepoints: dict) -> None:
         "//!",
         "//! Chaque constante est un texte d'un caractère, à mêler au texte normal :",
         '//! `format!("{} Supprimer", icons::DELETE)`.',
-        "",
         "",
     ]
     for const, name in ICONS.items():

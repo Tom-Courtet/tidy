@@ -253,6 +253,310 @@ pub fn confirm(
     answer
 }
 
+/// Couleurs proposées pour les boîtes (fond, titre) : neutres de la DA, puis teintes
+/// douces. Une pastille « autre » ouvre le sélecteur complet.
+pub const SWATCHES: [Color32; 12] = [
+    theme::SURFACE,
+    theme::SURFACE_HI,
+    Color32::from_rgb(0x3a, 0x3a, 0x42),
+    theme::TEXT,
+    theme::ACCENT,
+    theme::ACCENT_2,
+    Color32::from_rgb(0x38, 0xbd, 0xf8),
+    Color32::from_rgb(0x22, 0xc5, 0x5e),
+    Color32::from_rgb(0xfa, 0xcc, 0x15),
+    theme::WARNING,
+    Color32::from_rgb(0xf4, 0x3f, 0x5e),
+    Color32::from_rgb(0xec, 0x48, 0x99),
+];
+
+/// Rangée de pastilles [`SWATCHES`] et sélecteur libre. Garde l'opacité de `color`.
+/// Renvoie `true` si la couleur a changé.
+pub fn swatches(ui: &mut Ui, color: &mut Color32) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        let alpha = color.a();
+        let opaque = |c: Color32| Color32::from_rgb(c.r(), c.g(), c.b());
+        for swatch_color in SWATCHES {
+            let selected = opaque(*color) == swatch_color;
+            let response = swatch(ui, swatch_color, selected);
+            if !selected {
+                // Les teintes sombres restent visibles sur une carte sombre.
+                ui.painter().rect_stroke(
+                    response.rect,
+                    6,
+                    Stroke::new(1.0, theme::BORDER),
+                    StrokeKind::Inside,
+                );
+            }
+            if response.clicked() && !selected {
+                *color = Color32::from_rgba_unmultiplied(
+                    swatch_color.r(),
+                    swatch_color.g(),
+                    swatch_color.b(),
+                    alpha,
+                );
+                changed = true;
+            }
+        }
+        let mut rgb = [color.r(), color.g(), color.b()];
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], alpha);
+            changed = true;
+        }
+    });
+    changed
+}
+
+/// Interrupteur (lime quand il est activé). Renvoie une réponse `changed()` au clic.
+pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
+    let size = egui::vec2(38.0, 22.0);
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, ""));
+    if ui.is_rect_visible(rect) {
+        let t = ui.ctx().animate_bool_responsive(response.id, *on);
+        let enabled = ui.is_enabled();
+        let track = if *on {
+            theme::ACCENT_2
+        } else if response.hovered() {
+            Color32::from_rgb(0x30, 0x30, 0x38)
+        } else {
+            theme::SURFACE_HI
+        };
+        let track = if enabled {
+            track
+        } else {
+            track.gamma_multiply(0.4)
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            CornerRadius::same(255),
+            track,
+            Stroke::new(1.0, if *on { track } else { theme::BORDER }),
+            StrokeKind::Inside,
+        );
+        let radius = rect.height() / 2.0 - 3.0;
+        let x = egui::lerp(
+            (rect.left() + radius + 3.0)..=(rect.right() - radius - 3.0),
+            t,
+        );
+        let knob = if *on {
+            theme::ON_ACCENT_2
+        } else {
+            theme::TEXT_DIM
+        };
+        painter.circle_filled(egui::pos2(x, rect.center().y), radius, knob);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Ligne de réglage : icône, titre et aide à gauche (l'aide passe à la ligne), contrôle
+/// à droite.
+pub fn setting_row<R>(
+    ui: &mut Ui,
+    icon: &str,
+    title: &str,
+    hint: Option<&str>,
+    control: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let out = control(ui);
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if !icon.is_empty() {
+                    ui.label(
+                        RichText::new(icon)
+                            .size(theme::SIZE_L)
+                            .color(theme::TEXT_DIM),
+                    );
+                    ui.add_space(2.0);
+                }
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.add(Label::new(RichText::new(title).size(theme::SIZE_M)).wrap());
+                    if let Some(hint) = hint {
+                        ui.add(Label::new(dim(hint)).wrap());
+                    }
+                });
+            });
+            out
+        })
+        .inner
+    })
+    .inner
+}
+
+/// Fine ligne de séparation entre les lignes d'une carte.
+pub fn row_separator(ui: &mut Ui) {
+    ui.add_space(4.0);
+    let rect = ui.available_rect_before_wrap();
+    let y = rect.top();
+    ui.painter().hline(
+        rect.left()..=rect.right(),
+        y,
+        Stroke::new(1.0, theme::BORDER),
+    );
+    ui.add_space(5.0);
+}
+
+/// Pastille de texte avec une croix (extension, étiquette). Renvoie `true` si on a
+/// cliqué la croix. D'un seul tenant : passe à la ligne entière dans un
+/// `horizontal_wrapped`.
+pub fn chip(ui: &mut Ui, text: &str) -> bool {
+    let font = egui::FontId::proportional(theme::SIZE_S);
+    let label = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT);
+    let cross = ui
+        .painter()
+        .layout_no_wrap(crate::icons::CLOSE.to_owned(), font, theme::TEXT_DIM);
+    let (pad_x, pad_y, gap) = (10.0, 4.0, 6.0);
+    let size = egui::vec2(
+        pad_x + label.size().x + gap + cross.size().x + pad_x * 0.7,
+        label.size().y.max(cross.size().y) + 2.0 * pad_y,
+    );
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let close_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.right() - cross.size().x - pad_x, rect.top()),
+        rect.max,
+    );
+    let close = ui
+        .interact(close_rect, response.id.with("retirer"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            CornerRadius::same(255),
+            theme::SURFACE_HI,
+            Stroke::new(1.0, theme::BORDER),
+            StrokeKind::Inside,
+        );
+        let y = rect.center().y;
+        painter.galley(
+            egui::pos2(rect.left() + pad_x, y - label.size().y / 2.0),
+            label,
+            theme::TEXT,
+        );
+        let color = if close.hovered() {
+            theme::DANGER
+        } else {
+            theme::TEXT_DIM
+        };
+        painter.galley(
+            egui::pos2(
+                rect.right() - pad_x * 0.7 - cross.size().x,
+                y - cross.size().y / 2.0,
+            ),
+            cross,
+            color,
+        );
+    }
+    close.clicked()
+}
+
+/// Bouton discret fait d'une icône seule, avec une info-bulle.
+pub fn icon_button(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
+    let button = Button::new(RichText::new(icon).size(theme::SIZE_L)).frame(false);
+    ui.add(button)
+        .on_hover_text(tooltip)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Points d'avancement d'un assistant : `count` étapes, `current` en lime (allongé).
+pub fn step_dots(ui: &mut Ui, count: usize, current: usize) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for i in 0..count {
+            let width = if i == current { 22.0 } else { 8.0 };
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 8.0), Sense::hover());
+            let color = if i == current {
+                theme::ACCENT_2
+            } else if i < current {
+                theme::ACCENT
+            } else {
+                theme::BORDER
+            };
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(255), color);
+        }
+    });
+}
+
+/// Grande carte à choisir (assistant) : icône, titre et texte. Bordure lime si elle
+/// est choisie. `width` : largeur de la carte, marges comprises.
+pub fn choice_card(
+    ui: &mut Ui,
+    selected: bool,
+    width: f32,
+    icon: &str,
+    title: &str,
+    body: &str,
+) -> Response {
+    let stroke = if selected {
+        Stroke::new(2.0, theme::ACCENT_2)
+    } else {
+        Stroke::new(1.0, theme::BORDER)
+    };
+    let inner = egui::Frame::new()
+        .fill(if selected {
+            theme::SURFACE_HI
+        } else {
+            theme::SURFACE
+        })
+        .stroke(stroke)
+        .corner_radius(CornerRadius::same(theme::CARD_RADIUS))
+        .inner_margin(18)
+        .show(ui, |ui| {
+            ui.set_width(width - 36.0 - 2.0 * stroke.width);
+            ui.set_min_height(150.0);
+            ui.vertical(|ui| {
+                let color = if selected {
+                    theme::ACCENT_2
+                } else {
+                    theme::ACCENT
+                };
+                ui.label(RichText::new(icon).size(28.0).color(color));
+                ui.add_space(6.0);
+                ui.label(RichText::new(title).bold().size(theme::SIZE_L));
+                ui.add_space(2.0);
+                ui.add(Label::new(RichText::new(body).color(theme::TEXT_DIM)).wrap());
+            });
+        });
+    ui.interact(
+        inner.response.rect,
+        Id::unique(("carte-choix", title)),
+        Sense::click(),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Bandeau d'information (fond violet discret), avec icône.
+pub fn notice(ui: &mut Ui, color: Color32, icon: &str, text: &str) -> Response {
+    let inner = ui.available_width() - 2.0 * (12.0 + 1.0);
+    egui::Frame::new()
+        .fill(color.gamma_multiply(0.15))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.6)))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(12)
+        .show(ui, |ui| {
+            ui.set_width(inner.max(0.0));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(icon).color(color));
+                ui.add(Label::new(text).wrap());
+            });
+        })
+        .response
+}
+
 /// Coupe un texte à `max` caractères (« … » compris).
 pub fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
