@@ -33,7 +33,7 @@ use windows::core::{Interface, PWSTR};
 pub struct ExplorerIcons;
 
 /// Initialise COM sur ce thread (sans erreur s'il l'est déjà, même autrement).
-fn com_init() {
+pub(super) fn com_init() {
     // SAFETY: appel sans pointeur ; un thread déjà initialisé renvoie S_FALSE ou
     // RPC_E_CHANGED_MODE, que l'on ignore volontairement.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
@@ -63,7 +63,7 @@ fn folder_view() -> Result<IFolderView> {
 }
 
 /// Élément d'identification rendu par le Shell, libéré à la fin.
-struct Pidl(*mut ITEMIDLIST);
+pub(super) struct Pidl(pub(super) *mut ITEMIDLIST);
 
 impl Drop for Pidl {
     fn drop(&mut self) {

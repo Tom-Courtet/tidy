@@ -20,6 +20,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::core::BOOL;
 
 use super::from_wide;
+use crate::convert::{PhysicalScreen, physical_to_points};
 
 /// `EDD_GET_DEVICE_INTERFACE_NAME` : demander le chemin d'interface du moniteur.
 const EDD_GET_DEVICE_INTERFACE_NAME: u32 = 1;
@@ -170,27 +171,26 @@ pub fn to_physical(rect: Rect) -> (i32, i32, i32, i32) {
     )
 }
 
+/// Point en pixels physiques → points, avec l'échelle de son écran.
+pub fn to_points(p: POINT) -> Point {
+    let screens: Vec<PhysicalScreen> = monitors()
+        .iter()
+        .map(|m| PhysicalScreen {
+            left: m.physical.left,
+            top: m.physical.top,
+            right: m.physical.right,
+            bottom: m.physical.bottom,
+            origin: m.screen.frame.origin(),
+            scale: m.screen.scale,
+        })
+        .collect();
+    physical_to_points(p.x, p.y, &screens)
+}
+
 /// Position de la souris en points.
 pub fn mouse_location() -> Point {
     let mut p = POINT { x: 0, y: 0 };
     // SAFETY: sortie locale.
     unsafe { GetCursorPos(&mut p) };
-    let monitors = monitors();
-    let containing = monitors.iter().find(|m| {
-        let r = &m.physical;
-        p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom
-    });
-    match containing {
-        Some(m) => {
-            let s = m.screen.scale;
-            Point {
-                x: m.screen.frame.x + (p.x - m.physical.left) as f32 / s,
-                y: m.screen.frame.y + (p.y - m.physical.top) as f32 / s,
-            }
-        }
-        None => Point {
-            x: p.x as f32,
-            y: p.y as f32,
-        },
-    }
+    to_points(p)
 }
