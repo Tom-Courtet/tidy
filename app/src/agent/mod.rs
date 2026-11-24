@@ -1,0 +1,337 @@
+//! Agent : discret dans la barre des menus, il tient l'état du bureau, les raccourcis
+//! globaux et surveille le processus du bureau.
+//!
+//! Répartition :
+//! - **thread principal** : boucle winit sans fenêtre (pas d'icône dans le Dock),
+//!   icône de la barre des menus ([`tray`]) et raccourcis ([`hotkeys`]), que macOS
+//!   veut sur ce thread ;
+//! - **fil du socket** ([`crate::ipc`]) : requêtes des autres processus, abonnements
+//!   aux événements ;
+//! - **fil de surveillance** ([`supervisor`]) : processus du bureau, icônes du Finder.
+
+mod hotkeys;
+mod supervisor;
+mod tray;
+
+use std::path::PathBuf;
+use std::process::{Child, Command as Process};
+use std::sync::{Arc, Mutex};
+
+use anyhow::{Context, Result};
+use tidy_core::events::{Event, EventBus};
+use tidy_core::settings::{DesktopMode, QuickAccessMode};
+use tidy_core::{Settings, Store};
+use winit::application::ApplicationHandler;
+use winit::event::{StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+use winit::window::WindowId;
+
+use crate::ipc::{self, Request, Response, Status};
+use hotkeys::{Action, Hotkeys};
+use supervisor::{Command, Shared, Supervisor};
+use tray::{MenuChoice, Tray, TrayView};
+
+/// Événements de la boucle principale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserEvent {
+    Menu(MenuChoice),
+    Hotkey(Action, bool),
+    OpenManager,
+    ReloadSettings,
+    ToggleDesktop,
+    RestoreFinder,
+    Quit,
+}
+
+/// Lance l'agent ; rend la main quand on le quitte. `open_manager` : ouvrir aussi la
+/// fenêtre principale (lancement à la main, pas à l'ouverture de session).
+pub fn run(store: Store, open_manager: bool) -> Result<()> {
+    let listener = ipc::bind(&store)?;
+    let _socket_guard = SocketGuard(store.socket_path());
+    let settings: Settings = store.load();
+    crate::lang::apply(settings.language);
+
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        // Pas d'icône dans le Dock ni de menu d'application : seulement la barre des menus.
+        builder
+            .with_activation_policy(ActivationPolicy::Accessory)
+            .with_default_menu(false);
+    }
+    let event_loop = builder.build().context("boucle d'événements")?;
+    let proxy = event_loop.create_proxy();
+
+    let bus = EventBus::default();
+    let shared = Arc::new(Mutex::new(Shared::default()));
+    let desktop_hidden = Arc::new(Mutex::new(false));
+    let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
+    supervisor.send(Command::Apply(settings.effective_desktop_mode()));
+
+    let handler = {
+        let proxy = proxy.clone();
+        let bus = bus.clone();
+        let store = store.clone();
+        let shared = Arc::clone(&shared);
+        let hidden = Arc::clone(&desktop_hidden);
+        let supervisor = supervisor.clone();
+        move |req: Request| {
+            let send = |e| proxy.send_event(e).map(|()| Response::Ok);
+            let result = match req {
+                Request::Ping | Request::Subscribe => Ok(Response::Ok),
+                Request::Status => Ok(Response::Status(Status {
+                    version: env!("CARGO_PKG_VERSION").into(),
+                    desktop_running: shared.lock().is_ok_and(|s| s.desktop_running),
+                    finder_hidden: tidy_platform::finder::hidden_by_tidy(
+                        &store.finder_marker_path(),
+                    ),
+                    desktop_hidden: hidden.lock().is_ok_and(|h| *h),
+                })),
+                Request::OpenManager => send(UserEvent::OpenManager),
+                Request::ReloadSettings => send(UserEvent::ReloadSettings),
+                Request::ReloadDesktop => {
+                    bus.publish(Event::DesktopChanged);
+                    Ok(Response::Ok)
+                }
+                Request::ToggleDesktop => send(UserEvent::ToggleDesktop),
+                Request::RestoreFinder => send(UserEvent::RestoreFinder),
+                Request::DesktopReady => {
+                    supervisor.send(Command::DesktopReady);
+                    Ok(Response::Ok)
+                }
+                Request::Quit => send(UserEvent::Quit),
+            };
+            result.unwrap_or_else(|_| Response::Error {
+                message: "agent en cours d'arrêt".into(),
+            })
+        }
+    };
+    ipc::serve(listener, bus.clone(), handler)?;
+
+    let mut app = App {
+        store,
+        settings,
+        proxy,
+        bus,
+        supervisor,
+        desktop_hidden,
+        tray: None,
+        hotkeys: None,
+        manager: None,
+        open_manager_at_start: open_manager,
+        quick_access: false,
+    };
+    event_loop
+        .run_app(&mut app)
+        .context("boucle d'événements")?;
+    log::info!("agent arrêté");
+    Ok(())
+}
+
+/// Retire le fichier du socket quand l'agent s'arrête.
+struct SocketGuard(PathBuf);
+
+impl Drop for SocketGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Partie « thread principal » de l'agent.
+struct App {
+    store: Store,
+    settings: Settings,
+    proxy: EventLoopProxy<UserEvent>,
+    bus: EventBus,
+    supervisor: Supervisor,
+    desktop_hidden: Arc<Mutex<bool>>,
+    tray: Option<Tray>,
+    hotkeys: Option<Hotkeys>,
+    /// Fenêtre principale, si elle est ouverte.
+    manager: Option<Child>,
+    open_manager_at_start: bool,
+    /// Accès rapide aux boîtes en cours.
+    quick_access: bool,
+}
+
+impl App {
+    /// Icône, raccourcis et réouverture, une fois la boucle lancée (exigence de macOS).
+    fn start(&mut self) {
+        self.start_tray();
+        self.register_hotkeys();
+        let proxy = self.proxy.clone();
+        tidy_platform::on_reopen(move || {
+            let _ = proxy.send_event(UserEvent::OpenManager);
+        });
+        if self.open_manager_at_start {
+            self.open_manager();
+        }
+        log::info!("agent prêt (données : {})", self.store.root().display());
+    }
+
+    fn register_hotkeys(&mut self) {
+        // L'ancien jeu d'abord : un même raccourci ne s'enregistre pas deux fois.
+        self.hotkeys = None;
+        let proxy = self.proxy.clone();
+        match Hotkeys::register(&self.settings.hotkeys, move |action, down| {
+            let _ = proxy.send_event(UserEvent::Hotkey(action, down));
+        }) {
+            Ok(h) => self.hotkeys = Some(h),
+            Err(e) => log::error!("raccourcis globaux indisponibles : {e:#}"),
+        }
+    }
+
+    fn refresh_tray(&mut self) {
+        let view = TrayView {
+            boxes_enabled: self.settings.desktop_mode != DesktopMode::Off,
+            desktop_hidden: self.desktop_hidden.lock().is_ok_and(|h| *h),
+        };
+        if let Some(tray) = &mut self.tray {
+            tray.show(view);
+        }
+    }
+
+    fn open_manager(&mut self) {
+        if let Some(child) = &mut self.manager
+            && matches!(child.try_wait(), Ok(None))
+        {
+            self.bus.publish(Event::FocusManager);
+            return;
+        }
+        match std::env::current_exe().and_then(|exe| Process::new(exe).arg("--manager").spawn()) {
+            Ok(child) => self.manager = Some(child),
+            Err(e) => log::error!("fenêtre principale impossible : {e}"),
+        }
+    }
+
+    fn reload_settings(&mut self) {
+        let old = std::mem::replace(&mut self.settings, self.store.load());
+        crate::lang::apply(self.settings.language);
+        if old.hotkeys != self.settings.hotkeys {
+            self.register_hotkeys();
+        }
+        if old.effective_desktop_mode() != self.settings.effective_desktop_mode() {
+            self.supervisor
+                .send(Command::Apply(self.settings.effective_desktop_mode()));
+        }
+        if old.launch_at_login != self.settings.launch_at_login
+            && let Err(e) = tidy_platform::current().set_login_item(self.settings.launch_at_login)
+        {
+            log::warn!("ouverture de session : {e:#}");
+        }
+        self.bus.publish(Event::SettingsChanged);
+        if old.language != self.settings.language {
+            // Les libellés du menu changent : on recrée l'icône.
+            self.tray = None;
+            self.start_tray();
+        } else {
+            self.refresh_tray();
+        }
+    }
+
+    fn start_tray(&mut self) {
+        let proxy = self.proxy.clone();
+        match Tray::new(move |choice| {
+            let _ = proxy.send_event(UserEvent::Menu(choice));
+        }) {
+            Ok(tray) => self.tray = Some(tray),
+            Err(e) => log::error!("icône de la barre des menus impossible : {e:#}"),
+        }
+        self.refresh_tray();
+    }
+
+    fn save_settings(&mut self, change: impl FnOnce(&mut Settings)) {
+        let mut settings = self.store.load::<Settings>();
+        change(&mut settings);
+        if let Err(e) = self.store.save(&settings) {
+            log::error!("réglages non enregistrés : {e:#}");
+        }
+        self.reload_settings();
+    }
+
+    fn toggle_desktop(&mut self) {
+        let hidden = {
+            let mut h = self
+                .desktop_hidden
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            *h = !*h;
+            *h
+        };
+        self.bus.publish(Event::DesktopVisibility { hidden });
+        self.refresh_tray();
+    }
+
+    fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        log::info!("arrêt demandé");
+        self.bus.publish(Event::Shutdown);
+        self.supervisor.shutdown();
+        // Raccourcis et icône retirés avant de rendre la main.
+        self.hotkeys = None;
+        self.tray = None;
+        event_loop.exit();
+    }
+}
+
+impl ApplicationHandler<UserEvent> for App {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if cause == StartCause::Init {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            self.start();
+        }
+    }
+
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::Menu(MenuChoice::OpenManager) | UserEvent::OpenManager => {
+                self.open_manager()
+            }
+            UserEvent::Menu(MenuChoice::ToggleBoxes) => {
+                let off = self.settings.desktop_mode != DesktopMode::Off;
+                self.save_settings(|s| {
+                    s.desktop_mode = if off {
+                        DesktopMode::Off
+                    } else if s.managed_consent {
+                        DesktopMode::Managed
+                    } else {
+                        DesktopMode::Overlay
+                    };
+                });
+            }
+            UserEvent::Menu(MenuChoice::ToggleDesktop) | UserEvent::ToggleDesktop => {
+                self.toggle_desktop()
+            }
+            UserEvent::Menu(MenuChoice::Quit) | UserEvent::Quit => self.quit(event_loop),
+            UserEvent::ReloadSettings => self.reload_settings(),
+            UserEvent::RestoreFinder => self.save_settings(|s| {
+                if s.desktop_mode == DesktopMode::Managed {
+                    s.desktop_mode = DesktopMode::Overlay;
+                }
+            }),
+            UserEvent::Hotkey(action, down) => match action {
+                Action::ToggleDesktop if down => self.toggle_desktop(),
+                Action::MainWindow if down => self.open_manager(),
+                Action::Search if down => self.bus.publish(Event::OpenSearch),
+                Action::QuickAccess => match self.settings.hotkeys.quick_access_mode {
+                    QuickAccessMode::Hold => {
+                        self.quick_access = down;
+                        self.bus.publish(Event::QuickAccess { active: down })
+                    }
+                    QuickAccessMode::Toggle if down => {
+                        self.quick_access = !self.quick_access;
+                        self.bus.publish(Event::QuickAccess {
+                            active: self.quick_access,
+                        })
+                    }
+                    QuickAccessMode::Toggle => {}
+                },
+                _ => {}
+            },
+        }
+    }
+}

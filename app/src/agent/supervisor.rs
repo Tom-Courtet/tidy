@@ -1,0 +1,237 @@
+//! Surveillance du processus du bureau (`tidy --desktop`) et sécurité du Finder.
+//!
+//! Règles :
+//! - en mode superposé ou géré, le processus du bureau tourne ; il est relancé s'il
+//!   s'arrête de lui-même ;
+//! - en mode géré, les icônes du Finder ne sont masquées qu'une fois les surfaces du
+//!   bureau posées ([`Command::DesktopReady`]) ;
+//! - trois arrêts imprévus en une minute : Tidy abandonne, **rend les icônes du
+//!   Finder** et attend un nouveau réglage ;
+//! - hors du mode géré, et à l'arrêt de l'agent, les icônes du Finder sont rendues si
+//!   Tidy les avait masquées (fichier témoin), y compris après un plantage précédent.
+
+use std::collections::VecDeque;
+use std::process::{Child, Command as Process};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use tidy_core::Store;
+use tidy_core::settings::DesktopMode;
+use tidy_platform::finder::{self, SystemFinder};
+
+/// Arrêts imprévus tolérés dans [`CRASH_WINDOW`] avant d'abandonner.
+const MAX_CRASHES: usize = 3;
+const CRASH_WINDOW: Duration = Duration::from_secs(60);
+/// Fréquence de vérification du processus.
+const POLL: Duration = Duration::from_millis(500);
+
+pub enum Command {
+    /// Appliquer un mode (démarrage, changement de réglage).
+    Apply(DesktopMode),
+    DesktopReady,
+    /// Arrêter le bureau, rendre le Finder, puis répondre.
+    Shutdown(Sender<()>),
+}
+
+/// État partagé avec le reste de l'agent.
+#[derive(Debug, Default)]
+pub struct Shared {
+    pub desktop_running: bool,
+}
+
+#[derive(Clone)]
+pub struct Supervisor {
+    tx: Sender<Command>,
+}
+
+impl Supervisor {
+    pub fn spawn(store: Store, shared: Arc<Mutex<Shared>>) -> Result<Self> {
+        let (tx, rx) = mpsc::channel();
+        thread::Builder::new()
+            .name("tidy-supervisor".into())
+            .spawn(move || Worker::new(store, shared).run(rx))
+            .context("fil de surveillance du bureau")?;
+        Ok(Self { tx })
+    }
+
+    pub fn send(&self, cmd: Command) {
+        if self.tx.send(cmd).is_err() {
+            log::warn!("surveillance du bureau arrêtée");
+        }
+    }
+
+    /// Arrête le bureau et rend le Finder ; attend au plus quelques secondes.
+    pub fn shutdown(&self) {
+        let (tx, rx) = mpsc::channel();
+        self.send(Command::Shutdown(tx));
+        let _ = rx.recv_timeout(Duration::from_secs(10));
+    }
+}
+
+struct Worker {
+    store: Store,
+    shared: Arc<Mutex<Shared>>,
+    mode: DesktopMode,
+    child: Option<Child>,
+    crashes: VecDeque<Instant>,
+    gave_up: bool,
+    ready: bool,
+}
+
+impl Worker {
+    fn new(store: Store, shared: Arc<Mutex<Shared>>) -> Self {
+        Self {
+            store,
+            shared,
+            mode: DesktopMode::Off,
+            child: None,
+            crashes: VecDeque::new(),
+            gave_up: false,
+            ready: false,
+        }
+    }
+
+    fn run(mut self, rx: Receiver<Command>) {
+        loop {
+            match rx.recv_timeout(POLL) {
+                Ok(Command::Apply(mode)) => self.apply(mode),
+                Ok(Command::DesktopReady) => {
+                    self.ready = true;
+                    if self.mode == DesktopMode::Managed {
+                        self.hide_finder();
+                    }
+                }
+                Ok(Command::Shutdown(ack)) => {
+                    self.stop_child();
+                    self.restore_finder();
+                    let _ = ack.send(());
+                    return;
+                }
+                Err(RecvTimeoutError::Timeout) => self.check_child(),
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.stop_child();
+                    self.restore_finder();
+                    return;
+                }
+            }
+        }
+    }
+
+    fn apply(&mut self, mode: DesktopMode) {
+        log::info!("mode du bureau : {mode:?}");
+        self.mode = mode;
+        self.gave_up = false;
+        self.crashes.clear();
+        match mode {
+            DesktopMode::Off => {
+                self.stop_child();
+                self.restore_finder();
+            }
+            DesktopMode::Overlay => {
+                self.restore_finder();
+                self.ensure_child();
+            }
+            DesktopMode::Managed => {
+                self.ensure_child();
+                if self.ready {
+                    self.hide_finder();
+                }
+            }
+        }
+    }
+
+    fn ensure_child(&mut self) {
+        if self.child.is_some() {
+            return;
+        }
+        self.ready = false;
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                log::error!("chemin de l'exécutable introuvable : {e}");
+                return;
+            }
+        };
+        match Process::new(exe).arg("--desktop").spawn() {
+            Ok(child) => {
+                log::info!("bureau lancé (pid {})", child.id());
+                self.child = Some(child);
+                self.set_running(true);
+            }
+            Err(e) => log::error!("lancement du bureau impossible : {e}"),
+        }
+    }
+
+    fn stop_child(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+            log::info!("bureau arrêté");
+        }
+        self.ready = false;
+        self.set_running(false);
+    }
+
+    /// Le bureau s'est-il arrêté de lui-même ?
+    fn check_child(&mut self) {
+        let Some(child) = &mut self.child else {
+            return;
+        };
+        let status = match child.try_wait() {
+            Ok(Some(status)) => status,
+            Ok(None) => return,
+            Err(e) => {
+                log::warn!("état du bureau illisible : {e}");
+                return;
+            }
+        };
+        self.child = None;
+        self.ready = false;
+        self.set_running(false);
+        if self.mode == DesktopMode::Off || self.gave_up {
+            return;
+        }
+        log::warn!("le bureau s'est arrêté ({status})");
+        let now = Instant::now();
+        self.crashes.push_back(now);
+        while self
+            .crashes
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > CRASH_WINDOW)
+        {
+            self.crashes.pop_front();
+        }
+        if self.crashes.len() >= MAX_CRASHES {
+            log::error!(
+                "le bureau s'est arrêté {MAX_CRASHES} fois en une minute : Tidy rend les icônes du Finder et n'insiste pas"
+            );
+            self.gave_up = true;
+            self.restore_finder();
+            return;
+        }
+        log::info!("relance du bureau");
+        thread::sleep(Duration::from_millis(300 * self.crashes.len() as u64));
+        self.ensure_child();
+    }
+
+    fn hide_finder(&self) {
+        if let Err(e) = finder::hide_icons(&SystemFinder, &self.store.finder_marker_path()) {
+            log::error!("masquage des icônes du Finder impossible : {e:#}");
+        }
+    }
+
+    fn restore_finder(&self) {
+        if let Err(e) = finder::restore_icons(&SystemFinder, &self.store.finder_marker_path()) {
+            log::error!("icônes du Finder non rétablies : {e:#} (essayer `tidy --restore-finder`)");
+        }
+    }
+
+    fn set_running(&self, running: bool) {
+        if let Ok(mut shared) = self.shared.lock() {
+            shared.desktop_running = running;
+        }
+    }
+}
