@@ -41,6 +41,14 @@ Journaux : `<données>\logs\` (Options > Diagnostic > Ouvrir les journaux). Plus
 - [ ] **Ctrl+Alt+H** : même bascule que le double-clic.
 - [ ] Icônes masquées, puis « Quitter Tidy » : les icônes reviennent.
 
+**Icônes rangées (piste 1, ADR 012)**
+- [ ] `.\tidy.exe --desktop-icons` : liste chaque icône du bureau avec son chemin complet et sa position.
+- [ ] Tidy lancé, `.\tidy.exe --hide-icon "<nom exact d'un fichier du bureau>"` (avec l'extension) : l'icône disparaît du bureau ; le fichier est intact dans l'Explorateur.
+- [ ] `.\tidy.exe --restore-desktop` : l'icône revient **exactement à sa place**.
+- [ ] Même essai avec « Organiser automatiquement les icônes » coché (clic droit sur le bureau > Affichage) : l'icône disparaît, et l'option est recochée après `--restore-desktop`.
+- [ ] Masquer une icône, puis « Quitter Tidy » : elle revient.
+- [ ] Masquer une icône, puis redémarrer l'Explorateur (Gestionnaire des tâches > Explorateur Windows > Redémarrer) : noter si elle réapparaît ; relancer Tidy puis quitter : elle doit être à sa place.
+
 **Écrans**
 - [ ] Deux écrans à échelles différentes (ex. 100 % et 150 %) : une boîte déplacée sur le second garde une taille correcte et revient au bon endroit après redémarrage.
 - [ ] Débrancher le second écran puis le rebrancher : la boîte retrouve sa place sur lui.

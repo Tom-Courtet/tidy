@@ -149,6 +149,15 @@ impl Store {
     }
 }
 
+/// Dossier du bureau de l'utilisateur, ou celui de `TIDY_DESKTOP_DIR` (essais sur un
+/// faux bureau).
+pub fn desktop_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("TIDY_DESKTOP_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    directories::UserDirs::new().and_then(|d| d.desktop_dir().map(Path::to_path_buf))
+}
+
 /// Écrit `bytes` dans `path` via un fichier temporaire du même dossier, synchronisé
 /// puis renommé.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {

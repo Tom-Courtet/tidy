@@ -35,7 +35,7 @@ Après la vague 0, deux changements (ADR 001 et 011) :
 1. *Déplacer les icônes rangées hors de l'écran* par les messages de la liste du bureau (`LVM_SETITEMPOSITION`, mémoire partagée avec l'Explorateur), puis les remettre en quittant. Aucun fichier touché ; demande « Organisation automatique » désactivée ; un plantage peut laisser des icônes hors de l'écran (l'agent les replace au démarrage suivant).
 2. *Attribut « caché » sur les fichiers rangés* : l'Explorateur ne les affiche plus. Modifie un attribut des fichiers (pas leur contenu), visible dans d'autres outils ; à rétablir en quittant.
 3. *Tout masquer et tout redessiner* (comme le mode géré de macOS) : liste du bureau cachée, Tidy dessine aussi les icônes hors boîte dans une fenêtre par groupe. Le plus propre visuellement, le plus long à faire.
-Recommandation : **1**, avec repli sur 3 si l'Explorateur la contrarie.
+Recommandation : **1**, avec repli sur 3 si l'Explorateur la contrarie. **Décidé : piste 1** (ADR 012), primitive faite et testable avec `tidy --hide-icon`.
 
 Les vagues 1 à 3 restent valables ; leurs lots implémentent Windows **et** macOS derrière `DesktopPlatform`, Windows d'abord. Les décisions macOS à revoir pour Windows sont notées dans les ADR 006, 007 et 008.
 

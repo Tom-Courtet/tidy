@@ -87,6 +87,12 @@ pub trait DesktopPlatform: Send + Sync {
     /// contextuel du bureau. Elle lance `tidy --create-box`.
     fn set_desktop_menu(&self, label: Option<&str>) -> Result<()>;
 
+    /// Positions des icônes du bureau du système, pour masquer les icônes rangées en
+    /// les déplaçant hors de l'écran (Windows). `None` si ce n'est pas possible ici.
+    fn desktop_icon_positions(&self) -> Option<&'static dyn tidy_core::icon_stash::DesktopIcons> {
+        None
+    }
+
     /// Ouvre un fichier ou un dossier avec l'application par défaut.
     fn open(&self, path: &Path) -> Result<()>;
 

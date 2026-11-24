@@ -3,9 +3,11 @@
 //! - [`screens`] : écrans, identifiant stable, échelle par écran ;
 //! - [`window`] : fenêtres posées sur le bureau (Win+D, ordre des fenêtres) ;
 //! - [`desktop`] : icônes de l'Explorateur, double-clic sur le bureau ;
+//! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
 //! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
 
 mod desktop;
+mod icons;
 mod registry;
 mod screens;
 mod window;
@@ -80,6 +82,10 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_desktop_menu(&self, label: Option<&str>) -> Result<()> {
         registry::set_desktop_menu(label)
+    }
+
+    fn desktop_icon_positions(&self) -> Option<&'static dyn tidy_core::icon_stash::DesktopIcons> {
+        Some(&icons::ExplorerIcons)
     }
 
     fn open(&self, path: &Path) -> Result<()> {

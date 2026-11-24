@@ -8,6 +8,7 @@
 pub mod category;
 pub mod events;
 pub mod geometry;
+pub mod icon_stash;
 pub mod model;
 pub mod rules;
 pub mod screen;

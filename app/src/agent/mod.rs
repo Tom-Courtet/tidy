@@ -171,6 +171,18 @@ impl App {
             let _ = platform.set_desktop_icons_hidden(false);
         }
         self.install_desktop_menu();
+        // Icônes rangées : les masquer, rendre celles qui ne le sont plus (y compris
+        // après un plantage). À part : l'Explorateur peut répondre lentement.
+        let store = self.store.clone();
+        std::thread::spawn(move || match crate::icons::sync(&store, &[]) {
+            Some(Ok(r)) => log::info!(
+                "icônes rangées : {} masquées, {} rendues",
+                r.hidden,
+                r.restored
+            ),
+            Some(Err(e)) => log::warn!("icônes rangées : {e:#}"),
+            None => {}
+        });
         if self.settings.quick_actions.double_click_to_hide {
             let proxy = std::sync::Mutex::new(self.proxy.clone());
             let watching = platform.watch_desktop_double_click(Box::new(move || {
@@ -321,6 +333,7 @@ impl App {
         if platform.desktop_icons_hidden() {
             let _ = platform.set_desktop_icons_hidden(false);
         }
+        crate::icons::restore_all(&self.store);
         // Raccourcis et icône retirés avant de rendre la main.
         self.hotkeys = None;
         self.tray = None;

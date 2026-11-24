@@ -116,6 +116,7 @@ pub fn restore_system_icons(store: &Store) {
         let _ = platform.set_desktop_icons_hidden(false);
     }
     let _ = finder::restore_icons(&SystemFinder, &store.finder_marker_path());
+    crate::icons::restore_all(store);
 }
 
 /// Fenêtre hôte : 1×1 point, au coin du cadre utile de l'écran principal.

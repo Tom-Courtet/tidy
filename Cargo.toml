@@ -57,6 +57,7 @@ objc2-core-graphics = { version = "0.3.2", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-service-management = { version = "0.3.2", default-features = false }
 windows-sys = "0.61"
+windows = { version = "0.62.2", default-features = false }
 
 [profile.release]
 opt-level = "s"

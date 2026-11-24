@@ -15,6 +15,7 @@
 
 mod agent;
 mod desktop;
+mod icons;
 mod ipc;
 mod lang;
 mod logging;
@@ -35,6 +36,8 @@ Usage :
   tidy --create-box       crée une boîte sous la souris (menu du bureau)
   tidy --toggle-desktop   masque ou montre le bureau (boîtes et icônes)
   tidy --restore-desktop  rend les icônes du bureau si Tidy les a masquées
+  tidy --desktop-icons    liste les icônes du bureau et leur position (Windows)
+  tidy --hide-icon <nom>  essai : masque l'icône d'un élément du bureau (Windows)
   tidy --uninstall        retire Tidy du système (menu du bureau, démarrage, icônes)
   tidy --quit             arrête l'agent
   tidy --version
@@ -50,6 +53,8 @@ enum Role {
     RestoreFinder,
     CreateBox,
     ToggleDesktop,
+    ListIcons,
+    HideIcon,
     Uninstall,
     Quit,
     Version,
@@ -65,6 +70,8 @@ fn parse_role(arg: Option<&str>) -> Option<Role> {
         Some("--restore-finder" | "--restore-desktop") => Role::RestoreFinder,
         Some("--create-box") => Role::CreateBox,
         Some("--toggle-desktop") => Role::ToggleDesktop,
+        Some("--desktop-icons") => Role::ListIcons,
+        Some("--hide-icon") => Role::HideIcon,
         Some("--uninstall") => Role::Uninstall,
         Some("--quit") => Role::Quit,
         Some("--version" | "-V") => Role::Version,
@@ -111,7 +118,11 @@ fn main() -> Result<()> {
             if explorer {
                 platform.set_desktop_icons_hidden(false)?;
             }
-            if finder || explorer {
+            let stashed = icons::restore_all(&store);
+            if stashed > 0 {
+                println!("{stashed} icône(s) rangée(s) remise(s) à leur place.");
+            }
+            if finder || explorer || stashed > 0 {
                 println!("Icônes du bureau rétablies.");
             } else {
                 println!("Tidy n'avait pas masqué les icônes du bureau : rien à faire.");
@@ -132,6 +143,42 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         },
+        Role::ListIcons => {
+            let Some(list) = tidy_platform::current().desktop_icon_positions() else {
+                println!("Positions des icônes du bureau : pas disponible sur cet OS.");
+                return Ok(());
+            };
+            for (path, pos) in list.positions()? {
+                let state = if pos.is_offscreen() {
+                    "  (masquée par Tidy)"
+                } else {
+                    ""
+                };
+                println!("{:>7} {:>7}  {}{state}", pos.x, pos.y, path.display());
+            }
+            Ok(())
+        }
+        Role::HideIcon => {
+            // Essai de la piste 1 : range virtuellement un élément du bureau.
+            let Some(name) = std::env::args().nth(2) else {
+                eprintln!("usage : tidy --hide-icon <nom d'un élément du bureau>");
+                std::process::exit(2);
+            };
+            let Some(desktop) = tidy_core::store::desktop_dir() else {
+                anyhow::bail!("dossier du bureau introuvable");
+            };
+            match icons::sync(&store, &[desktop.join(&name)]) {
+                Some(report) => {
+                    let report = report?;
+                    println!(
+                        "{} icône(s) masquée(s). `tidy --restore-desktop` les remet à leur place.",
+                        report.hidden
+                    );
+                }
+                None => println!("Pas disponible sur cet OS."),
+            }
+            Ok(())
+        }
         Role::Uninstall => {
             // Tout ce que Tidy a posé hors de son dossier de données.
             let _ = ipc::request(&store, &Request::Quit);
@@ -145,6 +192,7 @@ fn main() -> Result<()> {
             if platform.desktop_icons_hidden() {
                 let _ = platform.set_desktop_icons_hidden(false);
             }
+            icons::restore_all(&store);
             let marker = store.finder_marker_path();
             let _ =
                 tidy_platform::finder::restore_icons(&tidy_platform::finder::SystemFinder, &marker);
