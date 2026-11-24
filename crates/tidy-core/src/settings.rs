@@ -195,7 +195,10 @@ pub struct SnapshotSettings {
 
 impl Default for SnapshotSettings {
     fn default() -> Self {
-        Self { auto: true, keep: 50 }
+        Self {
+            auto: true,
+            keep: 50,
+        }
     }
 }
 

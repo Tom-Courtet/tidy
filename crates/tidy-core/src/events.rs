@@ -16,26 +16,45 @@ use crate::screen::Screen;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// Un élément est apparu dans `~/Desktop` (ou dans un dossier surveillé).
-    FileCreated { path: PathBuf },
-    FileRemoved { path: PathBuf },
-    FileRenamed { from: PathBuf, to: PathBuf },
-    FileModified { path: PathBuf },
+    FileCreated {
+        path: PathBuf,
+    },
+    FileRemoved {
+        path: PathBuf,
+    },
+    FileRenamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    FileModified {
+        path: PathBuf,
+    },
     /// Les écrans ont changé (branchement, résolution, disposition).
-    ScreensChanged { screens: Vec<Screen> },
+    ScreensChanged {
+        screens: Vec<Screen>,
+    },
     /// `config.json` a changé : relire les réglages.
     SettingsChanged,
     /// `desktop.json` a changé : relire l'état du bureau.
     DesktopChanged,
     /// Une boîte a changé (position, contenu, apparence).
-    BoxChanged { id: BoxId },
+    BoxChanged {
+        id: BoxId,
+    },
     /// Masquer (`hidden: true`) ou montrer le bureau.
-    DesktopVisibility { hidden: bool },
+    DesktopVisibility {
+        hidden: bool,
+    },
     /// Basculer la visibilité du bureau (raccourci, double-clic).
     ToggleDesktop,
     /// Accès rapide aux boîtes : `active` pendant l'appui (ou jusqu'au suivant).
-    QuickAccess { active: bool },
+    QuickAccess {
+        active: bool,
+    },
     /// Ouvrir le lanceur de recherche.
     OpenSearch,
+    /// Ramener la fenêtre principale devant (elle est déjà ouverte).
+    FocusManager,
     /// L'agent s'arrête : les autres processus se ferment.
     Shutdown,
 }

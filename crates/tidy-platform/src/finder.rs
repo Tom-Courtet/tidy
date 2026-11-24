@@ -43,7 +43,9 @@ impl FinderPrefs for SystemFinder {
             // Clé absente : `defaults` échoue avec « does not exist ».
             return Ok(None);
         }
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_ascii_lowercase();
+        let text = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .to_ascii_lowercase();
         Ok(Some(matches!(text.as_str(), "1" | "true" | "yes")))
     }
 

@@ -22,7 +22,7 @@ pub fn state() -> State {
     if !in_bundle() {
         return not_bundled();
     }
-    // SAFETY : SMAppService existe depuis macOS 13 (Tidy demande macOS 14).
+    // SAFETY: SMAppService existe depuis macOS 13 (Tidy demande macOS 14).
     let status = unsafe { SMAppService::mainAppService().status() };
     match status {
         SMAppServiceStatus::Enabled => State::On,
@@ -35,11 +35,13 @@ pub fn set(enabled: bool) -> Result<State> {
     if !in_bundle() {
         return Ok(not_bundled());
     }
-    // SAFETY : voir `state`.
+    // SAFETY: voir `state`.
     let service = unsafe { SMAppService::mainAppService() };
     let result = if enabled {
+        // SAFETY: service valide (voir `state`), appel sans argument.
         unsafe { service.registerAndReturnError() }
     } else {
+        // SAFETY: service valide (voir `state`), appel sans argument.
         unsafe { service.unregisterAndReturnError() }
     };
     if let Err(e) = result {

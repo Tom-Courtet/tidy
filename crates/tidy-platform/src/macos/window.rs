@@ -20,7 +20,7 @@ fn ns_window(window: &dyn HasWindowHandle) -> Option<Retained<NSWindow>> {
     let RawWindowHandle::AppKit(h) = handle.as_raw() else {
         return None;
     };
-    // SAFETY : winit fournit un pointeur valide vers la NSView de la fenêtre, vivante
+    // SAFETY: winit fournit un pointeur valide vers la NSView de la fenêtre, vivante
     // tant que la fenêtre existe (l'appelant tient la fenêtre).
     let view: &NSView = unsafe { h.ns_view.cast().as_ref() };
     view.window()

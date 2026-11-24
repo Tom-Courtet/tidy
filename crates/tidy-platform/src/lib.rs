@@ -58,8 +58,7 @@ pub trait DesktopPlatform: Send + Sync {
 
     /// Même chose pour une fenêtre secondaire d'egui, retrouvée par son titre. `false`
     /// si elle n'existe pas encore (à réessayer à l'image suivante).
-    fn make_desktop_surface_titled(&self, title: &str, frame: Rect, level: SurfaceLevel)
-    -> bool;
+    fn make_desktop_surface_titled(&self, title: &str, frame: Rect, level: SurfaceLevel) -> bool;
 
     /// Mode superposé : la surface de titre `title` ne reçoit les clics que dans
     /// `regions` (coordonnées globales) ; ailleurs, ils passent aux icônes du Finder.
@@ -78,6 +77,16 @@ pub trait DesktopPlatform: Send + Sync {
 
     fn login_item(&self) -> LoginState;
     fn set_login_item(&self, enabled: bool) -> Result<LoginState>;
+}
+
+/// macOS : appelle `on_reopen` quand l'utilisateur rouvre Tidy.app alors qu'il tourne
+/// (Finder, Launchpad, Spotlight). À installer une fois, sur le thread principal, la
+/// boucle d'événements lancée. Sans effet ailleurs.
+pub fn on_reopen(on_reopen: impl Fn() + Send + Sync + 'static) {
+    #[cfg(target_os = "macos")]
+    macos::reopen::install(on_reopen);
+    #[cfg(not(target_os = "macos"))]
+    let _ = on_reopen;
 }
 
 /// Implémentation pour l'OS courant.

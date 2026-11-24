@@ -20,7 +20,10 @@ pub fn logo(ui: &mut Ui, size: f32) -> Response {
 pub fn paint_logo(painter: &egui::Painter, rect: egui::Rect) {
     let u = rect.width() / 48.0;
     let at = |x: f32, y: f32, w: f32, h: f32| {
-        egui::Rect::from_min_size(rect.min + egui::vec2(x * u, y * u), egui::vec2(w * u, h * u))
+        egui::Rect::from_min_size(
+            rect.min + egui::vec2(x * u, y * u),
+            egui::vec2(w * u, h * u),
+        )
     };
     let r = |v: f32| (v * u).round().clamp(0.0, 255.0) as u8;
     // Corps de la boîte.
@@ -53,7 +56,9 @@ pub fn app_header(ui: &mut Ui, title: &str) {
 
 /// Texte secondaire (gris, petit).
 pub fn dim(text: impl Into<String>) -> RichText {
-    RichText::new(text).color(theme::TEXT_DIM).size(theme::SIZE_S)
+    RichText::new(text)
+        .color(theme::TEXT_DIM)
+        .size(theme::SIZE_S)
 }
 
 /// Ligne d'aide grise, qui passe à la ligne si besoin.
@@ -71,15 +76,18 @@ pub fn section_title(ui: &mut Ui, text: impl Into<String>) -> Response {
     ui.label(RichText::new(text).bold().size(theme::SIZE_L))
 }
 
-/// Carte : surface arrondie avec bordure, pour regrouper des réglages.
+/// Carte : surface arrondie avec bordure, pour regrouper des réglages. Occupe toute
+/// la largeur disponible, marges et bordure comprises.
 pub fn card<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    const MARGIN: i8 = 16;
+    let inner = ui.available_width() - 2.0 * (f32::from(MARGIN) + 1.0);
     egui::Frame::new()
         .fill(theme::SURFACE)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(CornerRadius::same(theme::CARD_RADIUS))
-        .inner_margin(16)
+        .inner_margin(MARGIN)
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            ui.set_width(inner.max(0.0));
             add_contents(ui)
         })
         .inner
@@ -142,18 +150,25 @@ pub fn choice_value<V: PartialEq>(
     response
 }
 
-/// Entrée de navigation latérale : icône et libellé, pleine largeur.
-pub fn nav_item(ui: &mut Ui, selected: bool, icon: &str, label: &str) -> Response {
-    let text = RichText::new(format!("{icon}  {label}")).size(theme::SIZE_M);
-    let text = if selected {
-        text.bold().color(theme::ON_ACCENT_2)
-    } else {
-        text
-    };
-    ui.add_sized(
-        [ui.available_width(), 32.0],
-        egui::Button::selectable(selected, text).frame_when_inactive(false),
-    )
+/// Navigation latérale : une entrée par ligne, icône et libellé alignés à gauche,
+/// pleine largeur. Renvoie l'indice cliqué.
+pub fn nav<'a>(
+    ui: &mut Ui,
+    selected: usize,
+    items: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Option<usize> {
+    let mut clicked = None;
+    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+        ui.spacing_mut().button_padding = egui::vec2(12.0, 8.0);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        for (i, (icon, label)) in items.into_iter().enumerate() {
+            let text = RichText::new(format!("{icon}   {label}")).size(theme::SIZE_M);
+            if choice(ui, i == selected, text).clicked() {
+                clicked = Some(i);
+            }
+        }
+    });
+    clicked
 }
 
 /// Pastille de couleur cliquable.
@@ -174,12 +189,21 @@ pub fn swatch(ui: &mut Ui, color: Color32, selected: bool) -> Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Badge d'état (pastille ronde et texte), comme « Pad simulé » dans Tappy.
+/// Badge d'état (fond plein arrondi), comme « Pad simulé » dans Tappy.
 pub fn badge(ui: &mut Ui, fill: Color32, text: impl Into<String>) -> Response {
-    let button = Button::new(RichText::new(text).bold().color(theme::on(fill)))
+    egui::Frame::new()
+        .fill(fill)
         .corner_radius(CornerRadius::same(255))
-        .sense(Sense::hover());
-    filled(ui, fill, button)
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(text)
+                    .bold()
+                    .size(theme::SIZE_S)
+                    .color(theme::on(fill)),
+            )
+        })
+        .response
 }
 
 /// Modale de confirmation. `Some(true)` : confirmé (bouton ou Entrée), `Some(false)` :

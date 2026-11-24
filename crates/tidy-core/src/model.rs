@@ -455,7 +455,9 @@ mod tests {
         b.tabs[0].items.push(ItemRef("Rapport.pdf".into()));
         let id = b.id;
         state.boxes.push(b);
-        state.rules.push(Rule::category(id, crate::category::Category::Document));
+        state
+            .rules
+            .push(Rule::category(id, crate::category::Category::Document));
         let items = state.remove_box(id);
         assert_eq!(items, vec![ItemRef("Rapport.pdf".into())]);
         assert!(state.boxes.is_empty());

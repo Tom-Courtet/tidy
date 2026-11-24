@@ -216,6 +216,10 @@ mod tests {
                 }
             }
         }
-        assert!(missing.is_empty(), "clés absentes :\n{}", missing.join("\n"));
+        assert!(
+            missing.is_empty(),
+            "clés absentes :\n{}",
+            missing.join("\n")
+        );
     }
 }

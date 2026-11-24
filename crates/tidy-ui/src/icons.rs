@@ -5,7 +5,6 @@
 //! Chaque constante est un texte d'un caractère, à mêler au texte normal :
 //! `format!("{} Supprimer", icons::DELETE)`.
 
-
 /// `package`
 pub const BOX: &str = "\u{E129}";
 /// `layout-dashboard`

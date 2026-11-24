@@ -85,10 +85,41 @@ impl Category {
                 "opus", "ra", "rf64", "sln", "tta", "voc", "vox", "wv",
             ],
             Category::Archive => &[
-                "zip", "rar", "7z", "iso", "gz", "gzip", "xz", "001", "cab", "txz", "lzma", "tar",
-                "cpio", "bz2", "bzip2", "tbz2", "tbz", "tgz", "tpz", "z", "taz", "lzh", "lha",
-                "rpm", "deb", "arj", "vhd", "vhdx", "wim", "swm", "esd", "xar", "squashfs",
-                "sparsebundle", "sparseimage",
+                "zip",
+                "rar",
+                "7z",
+                "iso",
+                "gz",
+                "gzip",
+                "xz",
+                "001",
+                "cab",
+                "txz",
+                "lzma",
+                "tar",
+                "cpio",
+                "bz2",
+                "bzip2",
+                "tbz2",
+                "tbz",
+                "tgz",
+                "tpz",
+                "z",
+                "taz",
+                "lzh",
+                "lha",
+                "rpm",
+                "deb",
+                "arj",
+                "vhd",
+                "vhdx",
+                "wim",
+                "swm",
+                "esd",
+                "xar",
+                "squashfs",
+                "sparsebundle",
+                "sparseimage",
             ],
             // Sur macOS : installeurs et scripts exécutables.
             Category::Executable => &[
@@ -144,13 +175,25 @@ mod tests {
 
     #[test]
     fn classify_common_files() {
-        assert_eq!(classify_by_extension("Rapport.PDF", false), Category::Document);
+        assert_eq!(
+            classify_by_extension("Rapport.PDF", false),
+            Category::Document
+        );
         assert_eq!(classify_by_extension("photo.heic", false), Category::Image);
-        assert_eq!(classify_by_extension("Safari.app", true), Category::Application);
+        assert_eq!(
+            classify_by_extension("Safari.app", true),
+            Category::Application
+        );
         assert_eq!(classify_by_extension("Projets", true), Category::Folder);
         assert_eq!(classify_by_extension("notes", false), Category::Other);
         assert_eq!(classify_by_extension(".zshrc", false), Category::Other);
-        assert_eq!(classify_by_extension("site.webloc", false), Category::WebLink);
-        assert_eq!(classify_by_extension("Install.dmg", false), Category::Executable);
+        assert_eq!(
+            classify_by_extension("site.webloc", false),
+            Category::WebLink
+        );
+        assert_eq!(
+            classify_by_extension("Install.dmg", false),
+            Category::Executable
+        );
     }
 }

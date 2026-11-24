@@ -65,8 +65,10 @@ fn install_monitors() {
             }
             event.as_ptr()
         });
-        // SAFETY : le bloc rend toujours l'événement reçu, pointeur valide.
-        if let Some(m) = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local) } {
+        // SAFETY: le bloc rend toujours l'événement reçu, pointeur valide.
+        let installed =
+            unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local) };
+        if let Some(m) = installed {
             monitors.push(m);
         }
     });
@@ -113,7 +115,13 @@ mod tests {
         let p = Point { x: 50.0, y: 50.0 };
         assert!(!should_ignore(&None, p));
         assert!(should_ignore(&Some(vec![]), p));
-        assert!(!should_ignore(&Some(vec![Rect::new(0.0, 0.0, 100.0, 100.0)]), p));
-        assert!(should_ignore(&Some(vec![Rect::new(60.0, 0.0, 100.0, 100.0)]), p));
+        assert!(!should_ignore(
+            &Some(vec![Rect::new(0.0, 0.0, 100.0, 100.0)]),
+            p
+        ));
+        assert!(should_ignore(
+            &Some(vec![Rect::new(60.0, 0.0, 100.0, 100.0)]),
+            p
+        ));
     }
 }

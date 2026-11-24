@@ -52,6 +52,9 @@ pub fn migrate<T: Versioned>(mut value: serde_json::Value) -> Result<T> {
     Ok(serde_json::from_value(value)?)
 }
 
+/// Longueur maximale d'un chemin de socket Unix, marge comprise.
+const SOCKET_PATH_MAX: usize = 100;
+
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
@@ -80,9 +83,18 @@ impl Store {
         &self.root
     }
 
-    /// Socket de l'agent.
+    /// Socket de l'agent : dans le dossier de données, sauf si le chemin dépasse la
+    /// limite des sockets Unix (104 octets sur macOS, cas d'un `TIDY_DATA_DIR` profond) ;
+    /// il va alors dans le dossier temporaire, sous un nom tiré du dossier de données.
     pub fn socket_path(&self) -> PathBuf {
-        self.root.join("tidy.sock")
+        let path = self.root.join("tidy.sock");
+        if path.as_os_str().len() < SOCKET_PATH_MAX {
+            return path;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&self.root, &mut hasher);
+        let hash = std::hash::Hasher::finish(&hasher);
+        std::env::temp_dir().join(format!("tidy-{hash:016x}.sock"))
     }
 
     /// Dossier des journaux.
@@ -142,10 +154,7 @@ impl Store {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().context("chemin sans dossier")?;
     fs::create_dir_all(dir)?;
-    let tmp = path.with_extension(format!(
-        "tmp-{}",
-        std::process::id()
-    ));
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
     {
         let mut file =
             fs::File::create(&tmp).with_context(|| format!("création de {}", tmp.display()))?;
@@ -179,6 +188,21 @@ mod tests {
         fs::write(store.path_of::<Settings>(), "{ pas du json").unwrap();
         assert_eq!(store.load::<Settings>(), Settings::default());
         assert!(dir.path().join("config.json.bad").exists());
+    }
+
+    #[test]
+    fn long_data_dirs_get_a_short_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let short = Store::open(dir.path()).unwrap();
+        let deep = dir.path().join("x".repeat(120));
+        let long = Store::open(&deep).unwrap();
+        assert!(long.socket_path().as_os_str().len() < SOCKET_PATH_MAX);
+        assert_ne!(long.socket_path(), short.socket_path());
+        // Stable d'un appel à l'autre.
+        assert_eq!(
+            long.socket_path(),
+            Store::open(&deep).unwrap().socket_path()
+        );
     }
 
     #[test]

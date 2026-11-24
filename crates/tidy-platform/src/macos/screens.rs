@@ -40,9 +40,8 @@ pub fn to_appkit(r: Rect) -> NSRect {
 fn active_displays() -> Vec<CGDirectDisplayID> {
     let mut ids = [0 as CGDirectDisplayID; MAX_DISPLAYS];
     let mut count = 0u32;
-    // SAFETY : `ids` a la place de MAX_DISPLAYS identifiants, `count` est valide.
-    let err =
-        unsafe { CGGetActiveDisplayList(MAX_DISPLAYS as u32, ids.as_mut_ptr(), &mut count) };
+    // SAFETY: `ids` a la place de MAX_DISPLAYS identifiants, `count` est valide.
+    let err = unsafe { CGGetActiveDisplayList(MAX_DISPLAYS as u32, ids.as_mut_ptr(), &mut count) };
     if err.0 != 0 {
         log::warn!("liste des écrans indisponible (erreur {})", err.0);
         return vec![CGMainDisplayID()];

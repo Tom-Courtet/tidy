@@ -2,6 +2,7 @@
 
 mod click_through;
 mod login;
+pub mod reopen;
 mod screens;
 mod window;
 

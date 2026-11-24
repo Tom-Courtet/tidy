@@ -115,9 +115,9 @@ impl Criterion {
             Criterion::Extensions { extensions } => extension_of(&item.name)
                 .is_some_and(|ext| extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext))),
             Criterion::NamePattern { pattern } => wildcard_match(pattern, &item.name),
-            Criterion::ModifiedWithin { days } => item.modified.is_some_and(|m| {
-                now.duration_since(m).as_secs() <= i64::from(*days) * 86_400
-            }),
+            Criterion::ModifiedWithin { days } => item
+                .modified
+                .is_some_and(|m| now.duration_since(m).as_secs() <= i64::from(*days) * 86_400),
             Criterion::LargerThan { bytes } => item.size > *bytes,
             Criterion::Custom { matcher, params } => registry
                 .get(matcher)
@@ -214,7 +214,12 @@ mod tests {
         let reg = MatcherRegistry::default();
         let now = Timestamp::now();
         assert_eq!(
-            target_for(&rules, &item("Facture mars.pdf", Category::Document), &reg, now),
+            target_for(
+                &rules,
+                &item("Facture mars.pdf", Category::Document),
+                &reg,
+                now
+            ),
             Some(invoices)
         );
         assert_eq!(
@@ -233,7 +238,7 @@ mod tests {
             "even_size"
         }
         fn matches(&self, item: &ItemInfo, _: &serde_json::Value, _: Timestamp) -> bool {
-            item.size % 2 == 0
+            item.size.is_multiple_of(2)
         }
     }
 
@@ -249,7 +254,10 @@ mod tests {
         )];
         let now = Timestamp::now();
         let empty = MatcherRegistry::default();
-        assert_eq!(target_for(&rules, &item("a", Category::Other), &empty, now), None);
+        assert_eq!(
+            target_for(&rules, &item("a", Category::Other), &empty, now),
+            None
+        );
         let mut reg = MatcherRegistry::default();
         reg.register(Box::new(Even));
         assert_eq!(
