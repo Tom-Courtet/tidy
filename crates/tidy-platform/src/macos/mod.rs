@@ -1,6 +1,5 @@
 //! Implémentation macOS (AppKit et CoreGraphics via objc2).
 
-mod click_through;
 mod login;
 pub mod reopen;
 mod screens;
@@ -40,8 +39,25 @@ impl DesktopPlatform for MacPlatform {
         window::make_surface_titled(title, frame, level)
     }
 
-    fn set_interactive_regions(&self, title: &str, regions: Option<Vec<Rect>>) {
-        click_through::set_regions(title, regions);
+    fn desktop_icons_hidden(&self) -> bool {
+        false
+    }
+
+    fn set_desktop_icons_hidden(&self, _hidden: bool) -> Result<()> {
+        // Les icônes du Finder ne se masquent qu'en relançant le Finder (mode géré,
+        // module `finder`) : pas pour un simple double-clic.
+        anyhow::bail!("masquage rapide des icônes du Finder indisponible")
+    }
+
+    fn watch_desktop_double_click(&self, _on_double_click: crate::Callback) -> bool {
+        // À faire : moniteur global + vérification que le clic tombe sur le bureau.
+        false
+    }
+
+    fn set_desktop_menu(&self, _label: Option<&str>) -> Result<()> {
+        // Le menu du bureau du Finder ne s'étend que par une extension Finder signée :
+        // hors de portée pour l'instant.
+        Ok(())
     }
 
     fn open(&self, path: &Path) -> Result<()> {

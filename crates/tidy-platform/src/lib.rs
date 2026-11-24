@@ -1,12 +1,17 @@
 //! Couche système de Tidy : tout ce qui touche à l'OS passe par ici.
 //!
 //! Le reste de l'application ne voit que le trait [`DesktopPlatform`] (renvoyé par
-//! [`current`]) et des types de `tidy-core`. macOS est implémenté ; Windows compile,
-//! avec des implémentations vides qui renvoient une erreur claire (portage prévu après
-//! la parité, voir ADR 001).
+//! [`current`]) et des types de `tidy-core`. Windows (cible prioritaire, ADR 001) et
+//! macOS sont implémentés ; les autres OS compilent avec des réponses vides.
 //!
 //! C'est la seule crate du dépôt où `unsafe` est permis : chaque bloc porte un
 //! commentaire `// SAFETY:`.
+//!
+//! Coordonnées : en **points**, origine en haut à gauche de l'écran principal. Sous
+//! Windows, un point vaut un pixel physique divisé par l'échelle de *son* écran (voir
+//! `windows/screens.rs`) : avec des écrans d'échelles différentes, les cadres logiques
+//! peuvent laisser des trous ou se chevaucher, mais toute position est rangée par écran
+//! et reconvertie avec l'échelle de cet écran.
 
 use std::path::Path;
 
@@ -18,8 +23,10 @@ use tidy_core::screen::Screen;
 pub mod finder;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 mod other;
+#[cfg(windows)]
+mod windows;
 
 /// État du lancement à l'ouverture de session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,35 +43,49 @@ pub enum LoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceLevel {
     /// Juste au-dessus des icônes du bureau, sous toutes les fenêtres des applis :
-    /// boîtes, widgets, icônes dessinées par Tidy.
+    /// boîtes, widgets.
     DesktopIcons,
     /// Au niveau du fond d'écran (fonds animés).
     Wallpaper,
 }
 
+/// Rappel appelé depuis le thread système (double-clic sur le bureau…).
+pub type Callback = Box<dyn Fn() + Send + Sync>;
+
 /// Services système dont Tidy a besoin.
 pub trait DesktopPlatform: Send + Sync {
-    /// Écrans branchés, en points, coordonnées globales (origine en haut à gauche de
-    /// l'écran principal).
+    /// Écrans branchés (voir les coordonnées en tête de crate).
     fn screens(&self) -> Vec<Screen>;
 
     /// Position de la souris, mêmes coordonnées que [`DesktopPlatform::screens`].
     fn mouse_location(&self) -> Point;
 
     /// Prépare une fenêtre pour le bureau : sans bordure ni ombre, au niveau `level`,
-    /// sur tous les Spaces, immobile pendant Mission Control et « Afficher le
-    /// bureau », absente de ⌘Tab, placée exactement sur `frame`.
+    /// sur tous les bureaux virtuels, immobile pendant « Afficher le bureau » (Win+D,
+    /// Mission Control), absente de la barre des tâches et du sélecteur de fenêtres,
+    /// placée exactement sur `frame`.
     fn make_desktop_surface(&self, window: &dyn HasWindowHandle, frame: Rect, level: SurfaceLevel);
 
     /// Même chose pour une fenêtre secondaire d'egui, retrouvée par son titre. `false`
     /// si elle n'existe pas encore (à réessayer à l'image suivante).
     fn make_desktop_surface_titled(&self, title: &str, frame: Rect, level: SurfaceLevel) -> bool;
 
-    /// Mode superposé : la surface de titre `title` ne reçoit les clics que dans
-    /// `regions` (coordonnées globales) ; ailleurs, ils passent aux icônes du Finder.
-    /// Liste vide : la surface entière laisse passer les clics. `None` : la surface
-    /// entière reçoit les clics (mode géré).
-    fn set_interactive_regions(&self, title: &str, regions: Option<Vec<Rect>>);
+    /// Icônes du bureau du système masquées ? (Windows : celles de l'Explorateur.)
+    fn desktop_icons_hidden(&self) -> bool;
+
+    /// Masque ou montre toutes les icônes du bureau du système. Sans redémarrer
+    /// l'Explorateur ni rien écrire sur le disque : un redémarrage de session les rend
+    /// toujours. Erreur si ce n'est pas possible sur cet OS.
+    fn set_desktop_icons_hidden(&self, hidden: bool) -> Result<()>;
+
+    /// Surveille les double-clics sur une zone vide du bureau du système et appelle
+    /// `on_double_click`. À appeler une fois, sur le thread principal (boucle de
+    /// messages). `false` si ce n'est pas disponible sur cet OS.
+    fn watch_desktop_double_click(&self, on_double_click: Callback) -> bool;
+
+    /// Ajoute (`Some(libellé)`) ou retire (`None`) l'entrée « Créer une boîte » du menu
+    /// contextuel du bureau. Elle lance `tidy --create-box`.
+    fn set_desktop_menu(&self, label: Option<&str>) -> Result<()>;
 
     /// Ouvre un fichier ou un dossier avec l'application par défaut.
     fn open(&self, path: &Path) -> Result<()>;
@@ -90,7 +111,7 @@ pub fn on_reopen(on_reopen: impl Fn() + Send + Sync + 'static) {
 }
 
 /// Passe au premier plan les fenêtres d'un autre processus de Tidy (la fenêtre
-/// principale déjà ouverte, par exemple). `false` si le processus est introuvable.
+/// principale déjà ouverte, par exemple). `false` si c'est impossible.
 pub fn activate_process(pid: u32) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -102,7 +123,11 @@ pub fn activate_process(pid: u32) -> bool {
             app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows)
         })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        windows::activate_process(pid)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = pid;
         false
@@ -115,7 +140,11 @@ pub fn current() -> &'static dyn DesktopPlatform {
     {
         &macos::MacPlatform
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        &windows::WindowsPlatform
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         &other::OtherPlatform
     }

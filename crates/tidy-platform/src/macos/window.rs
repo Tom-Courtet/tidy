@@ -67,7 +67,13 @@ pub fn make_surface_titled(title: &str, frame: Rect, surface: SurfaceLevel) -> b
         return false;
     };
     let windows = NSApplication::sharedApplication(mtm).windows();
-    match windows.iter().find(|w| w.title().to_string() == title) {
+    // La plus récente des fenêtres visibles de ce titre (une fenêtre fermée peut rester
+    // un instant dans la liste).
+    match windows
+        .iter()
+        .filter(|w| w.isVisible() && w.title().to_string() == title)
+        .last()
+    {
         Some(win) => {
             configure(&win, frame, surface);
             true

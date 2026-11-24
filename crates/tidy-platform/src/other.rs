@@ -1,6 +1,4 @@
-//! Windows et autres OS : implémentation provisoire, qui compile et répond poliment.
-//! Le vrai portage Windows (WorkerW/Progman, ListView du bureau, SHGetFileInfo) arrive
-//! après la parité macOS (ADR 001).
+//! Autres OS (Linux…) : implémentation vide, qui compile et répond poliment.
 
 use std::path::Path;
 
@@ -40,7 +38,21 @@ impl DesktopPlatform for OtherPlatform {
         true
     }
 
-    fn set_interactive_regions(&self, _: &str, _: Option<Vec<Rect>>) {}
+    fn desktop_icons_hidden(&self) -> bool {
+        false
+    }
+
+    fn set_desktop_icons_hidden(&self, _: bool) -> Result<()> {
+        bail!("icônes du bureau : {NOT_YET}")
+    }
+
+    fn watch_desktop_double_click(&self, _: crate::Callback) -> bool {
+        false
+    }
+
+    fn set_desktop_menu(&self, _: Option<&str>) -> Result<()> {
+        Ok(())
+    }
 
     fn open(&self, _: &Path) -> Result<()> {
         bail!("ouvrir : {NOT_YET}")
