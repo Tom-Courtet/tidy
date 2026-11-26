@@ -5,19 +5,18 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use tidy_core::icon_stash::{self, SyncReport};
-use tidy_core::store::desktop_dir;
+use tidy_core::store::{desktop_dirs, resolve_desktop_item};
 use tidy_core::{DesktopState, Store};
 
-/// Chemins des éléments rangés dans une boîte.
+/// Chemins des éléments rangés dans une boîte (bureau de l'utilisateur ou bureau
+/// public).
 pub fn boxed_paths(state: &DesktopState) -> Vec<PathBuf> {
-    let Some(desktop) = desktop_dir() else {
-        return Vec::new();
-    };
+    let dirs = desktop_dirs();
     state
         .boxes
         .iter()
         .flat_map(|b| b.items())
-        .map(|item| desktop.join(&item.0))
+        .filter_map(|item| resolve_desktop_item(&dirs, &item.0))
         .collect()
 }
 
@@ -27,6 +26,49 @@ pub fn sync(store: &Store, extra: &[PathBuf]) -> Option<Result<SyncReport>> {
     let mut boxed = boxed_paths(&store.load());
     boxed.extend_from_slice(extra);
     Some(icon_stash::sync(store, icons, &boxed))
+}
+
+/// Note ce qu'a fait [`sync`] dans le journal ; `quiet` : rien si rien n'a changé.
+pub fn log_report(result: Option<Result<SyncReport>>, quiet: bool) {
+    match result {
+        Some(Ok(r)) => {
+            if !(quiet && r.hidden + r.restored == 0 && r.stuck.is_empty()) {
+                log::info!(
+                    "icônes rangées : {} masquées, {} rendues ({} icônes sur le bureau)",
+                    r.hidden,
+                    r.restored,
+                    r.on_desktop
+                );
+            }
+            if !r.not_found.is_empty() {
+                log::info!(
+                    "icônes rangées absentes du bureau de l'Explorateur : {}",
+                    list(&r.not_found)
+                );
+            }
+            if !r.stuck.is_empty() {
+                log::warn!(
+                    "icônes rangées restées à l'écran (l'Explorateur refuse de les déplacer) : {}",
+                    list(&r.stuck)
+                );
+            }
+        }
+        Some(Err(e)) => log::warn!("icônes rangées : {e:#}"),
+        None => {}
+    }
+}
+
+/// Quelques chemins, pour le journal.
+fn list(paths: &[PathBuf]) -> String {
+    let mut out: Vec<String> = paths
+        .iter()
+        .take(8)
+        .map(|p| p.display().to_string())
+        .collect();
+    if paths.len() > 8 {
+        out.push(format!("… (+{})", paths.len() - 8));
+    }
+    out.join(" ; ")
 }
 
 /// Rend toutes les icônes masquées par Tidy (quitter, désinstaller, secours).

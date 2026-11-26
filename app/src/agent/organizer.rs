@@ -10,7 +10,7 @@
 //! passe par [`route`] (un seul écrivain : le bureau), puis les icônes rangées sont
 //! resynchronisées (`crate::icons::sync`, Windows).
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -18,8 +18,8 @@ use jiff::Timestamp;
 use tidy_core::events::{Event, EventBus};
 use tidy_core::organize::{self, DefaultBoxNames, Scope};
 use tidy_core::rules::MatcherRegistry;
-use tidy_core::scan::scan_entries;
-use tidy_core::store::{desktop_dir, write_atomic};
+use tidy_core::scan::scan_desktop;
+use tidy_core::store::{desktop_dirs, write_atomic};
 use tidy_core::{DesktopCommand, DesktopState, Settings, Store};
 use tidy_ui::t;
 
@@ -85,7 +85,7 @@ pub fn route(
 /// a encore ni boîte ni règle) ou seulement aux non affectés.
 pub fn apply_rules(store: &Store, bus: &EventBus, all: bool) -> Response {
     let _organizing = ORGANIZING.lock().unwrap_or_else(|p| p.into_inner());
-    match try_apply_rules(store, bus, all, desktop_dir().as_deref()) {
+    match try_apply_rules(store, bus, all, &desktop_dirs()) {
         Ok(()) => Response::Ok,
         Err(message) => {
             log::warn!("rangement : {message}");
@@ -98,10 +98,12 @@ fn try_apply_rules(
     store: &Store,
     bus: &EventBus,
     all: bool,
-    desktop: Option<&Path>,
+    desktop: &[PathBuf],
 ) -> Result<(), String> {
-    let dir = desktop.ok_or_else(|| t!("organize.no_desktop").to_owned())?;
-    let entries = scan_entries(dir).map_err(|e| t!("organize.scan_failed", error = e))?;
+    if desktop.is_empty() {
+        return Err(t!("organize.no_desktop").to_owned());
+    }
+    let entries = scan_desktop(desktop).map_err(|e| t!("organize.scan_failed", error = e))?;
     let state: DesktopState = store.load();
     let mut settings: Settings = store.load();
     let scope = if all { Scope::All } else { Scope::Unassigned };
@@ -227,15 +229,7 @@ fn sync_icons(store: &Store, desktop_running: bool) {
         if desktop_running {
             std::thread::sleep(DESKTOP_SAVE_DELAY);
         }
-        match crate::icons::sync(&store, &[]) {
-            Some(Ok(r)) if r.hidden + r.restored > 0 => log::info!(
-                "icônes rangées : {} masquées, {} rendues",
-                r.hidden,
-                r.restored
-            ),
-            Some(Err(e)) => log::warn!("icônes rangées : {e:#}"),
-            _ => {}
-        }
+        crate::icons::log_report(crate::icons::sync(&store, &[]), true);
     });
 }
 
@@ -272,7 +266,7 @@ mod tests {
                 message: t!("organize.nothing_to_undo").to_owned()
             }
         );
-        try_apply_rules(&store, &bus, true, Some(desktop.path())).unwrap();
+        try_apply_rules(&store, &bus, true, &[desktop.path().to_path_buf()]).unwrap();
         let state: DesktopState = store.load();
         assert_eq!(state.boxes.len(), 3, "démarrage rapide");
         let boxed: Vec<&ItemRef> = state.boxes.iter().flat_map(DeskBox::items).collect();
@@ -287,13 +281,13 @@ mod tests {
         // Un nouveau fichier, puis « Appliquer aux non affectés » : la copie d'avant le
         // premier rangement n'est pas remplacée.
         std::fs::write(desktop.path().join("musique.mp3"), b"x").unwrap();
-        try_apply_rules(&store, &bus, false, Some(desktop.path())).unwrap();
+        try_apply_rules(&store, &bus, false, &[desktop.path().to_path_buf()]).unwrap();
         let state: DesktopState = store.load();
         assert!(state.box_of(&ItemRef("musique.mp3".into())).is_some());
 
         assert_eq!(undo(&store, &bus), Response::Ok);
         assert_eq!(store.load::<DesktopState>(), before);
         assert!(!data.path().join(BEFORE_ORGANIZE_FILE).exists());
-        assert!(try_apply_rules(&store, &bus, true, None).is_err());
+        assert!(try_apply_rules(&store, &bus, true, &[]).is_err());
     }
 }

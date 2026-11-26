@@ -23,9 +23,9 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Variant::{VARIANT, VT_I4};
 use windows::Win32::UI::Shell::Common::{ITEMIDLIST, STRRET};
 use windows::Win32::UI::Shell::{
-    CSIDL_DESKTOP, FWF_AUTOARRANGE, IFolderView, IFolderView2, IShellBrowser, IShellFolder,
-    IShellWindows, SHGDN_FORPARSING, SID_STopLevelBrowser, SVGIO_ALLVIEW, SVSI_POSITIONITEM,
-    SWC_DESKTOP, SWFO_NEEDDISPATCH, ShellWindows, StrRetToStrW,
+    CSIDL_DESKTOP, FWF_AUTOARRANGE, FWF_SNAPTOGRID, IFolderView, IFolderView2, IShellBrowser,
+    IShellFolder, IShellWindows, SHGDN_FORPARSING, SID_STopLevelBrowser, SVGIO_ALLVIEW,
+    SVSI_POSITIONITEM, SWC_DESKTOP, SWFO_NEEDDISPATCH, ShellWindows, StrRetToStrW,
 };
 use windows::core::{Interface, PWSTR};
 
@@ -154,10 +154,25 @@ impl DesktopIcons for ExplorerIcons {
     }
 
     fn set_auto_arrange(&self, on: bool) -> Result<()> {
-        let view: IFolderView2 = folder_view()?.cast()?;
-        let bit = FWF_AUTOARRANGE.0 as u32;
-        // SAFETY: on ne change que le bit de disposition automatique.
-        unsafe { view.SetCurrentFolderFlags(bit, if on { bit } else { 0 })? };
-        Ok(())
+        set_flag(FWF_AUTOARRANGE.0 as u32, on)
     }
+
+    fn snap_to_grid(&self) -> Result<bool> {
+        let view: IFolderView2 = folder_view()?.cast()?;
+        // SAFETY: lecture des options de la vue.
+        let flags = unsafe { view.GetCurrentFolderFlags()? };
+        Ok(flags & FWF_SNAPTOGRID.0 as u32 != 0)
+    }
+
+    fn set_snap_to_grid(&self, on: bool) -> Result<()> {
+        set_flag(FWF_SNAPTOGRID.0 as u32, on)
+    }
+}
+
+/// Change une seule option de la vue du bureau.
+fn set_flag(bit: u32, on: bool) -> Result<()> {
+    let view: IFolderView2 = folder_view()?.cast()?;
+    // SAFETY: le masque limite le changement au seul bit demandé.
+    unsafe { view.SetCurrentFolderFlags(bit, if on { bit } else { 0 })? };
+    Ok(())
 }

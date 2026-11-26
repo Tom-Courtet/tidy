@@ -30,7 +30,7 @@ mod portal;
 mod roll;
 mod textures;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
@@ -42,10 +42,10 @@ use tidy_core::events::Event;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::model::{Appearance, BoxId, BoxKind, DeskBox, SortKey, Tab};
 use tidy_core::rules::ItemInfo;
-use tidy_core::scan::scan_dir;
+use tidy_core::scan::scan_desktop_located;
 use tidy_core::screen::Screen;
 use tidy_core::snap::{Edges, SnapContext, snap, snap_resize};
-use tidy_core::store::desktop_dir;
+use tidy_core::store::{desktop_dir, public_desktop_dir};
 use tidy_core::{DesktopState, Settings, Store};
 use tidy_platform::SurfaceLevel;
 use tidy_platform::finder::{self, SystemFinder};
@@ -54,7 +54,7 @@ use tidy_ui::t;
 use crate::ipc::{self, Request, Response};
 use action::Action;
 use boxwin::{BoxUi, BoxView, NameEdit, PortalView, TITLE_HEIGHT};
-use items::{RenameEdit, Section};
+use items::{ItemDir, RenameEdit, Section};
 use overlay::{Overlay, PopupKind};
 use portal::{DirWatcher, Portal, PortalRefusal};
 
@@ -241,15 +241,7 @@ impl IconSync {
                     // Regrouper les demandes arrivées entre-temps.
                     std::thread::sleep(Duration::from_millis(150));
                     while rx.try_recv().is_ok() {}
-                    match crate::icons::sync(&store, &[]) {
-                        Some(Ok(r)) => log::debug!(
-                            "icônes rangées : {} masquées, {} rendues",
-                            r.hidden,
-                            r.restored
-                        ),
-                        Some(Err(e)) => log::warn!("icônes rangées : {e:#}"),
-                        None => {}
-                    }
+                    crate::icons::log_report(crate::icons::sync(&store, &[]), true);
                 }
             });
         if let Err(e) = spawned {
@@ -341,6 +333,9 @@ struct Desktop {
     ready_sent: bool,
     /// Dossier du bureau et ses éléments.
     desktop_dir: Option<PathBuf>,
+    /// Bureau public (Windows) et noms des éléments qui en viennent.
+    public_dir: Option<PathBuf>,
+    public_names: Arc<HashSet<String>>,
     files: HashMap<String, ItemInfo>,
     /// Surveillance du bureau quand aucun agent ne la fait (bureau autonome).
     desktop_watch: Option<DirWatcher>,
@@ -392,6 +387,8 @@ impl Desktop {
             hidden: false,
             ready_sent: false,
             desktop_dir,
+            public_dir: public_desktop_dir(),
+            public_names: Arc::default(),
             files: HashMap::new(),
             desktop_watch,
             generation: 0,
@@ -419,9 +416,22 @@ impl Desktop {
         let Some(dir) = &self.desktop_dir else {
             return false;
         };
-        match scan_dir(dir) {
+        let dirs: Vec<PathBuf> = std::iter::once(dir.clone())
+            .chain(self.public_dir.clone())
+            .collect();
+        match scan_desktop_located(&dirs) {
             Ok(items) => {
-                self.files = items.into_iter().map(|i| (i.name.clone(), i)).collect();
+                self.public_names = Arc::new(
+                    items
+                        .iter()
+                        .filter(|(_, i)| *i > 0)
+                        .map(|(e, _)| e.info.name.clone())
+                        .collect(),
+                );
+                self.files = items
+                    .into_iter()
+                    .map(|(e, _)| (e.info.name.clone(), e.info))
+                    .collect();
                 true
             }
             Err(e) => {
@@ -571,10 +581,16 @@ impl Desktop {
     }
 
     /// Dossier des éléments d'une boîte : le bureau, ou le dossier affiché du portail.
-    fn dir_of(&self, b: BoxId) -> Option<PathBuf> {
+    fn dir_of(&self, b: BoxId) -> Option<ItemDir> {
         match self.portals.get(&b) {
-            Some(p) => Some(p.current()),
-            None => self.desktop_dir.clone(),
+            Some(p) => Some(ItemDir::plain(p.current())),
+            None => Some(ItemDir {
+                main: self.desktop_dir.clone()?,
+                public: self
+                    .public_dir
+                    .clone()
+                    .map(|d| (d, self.public_names.clone())),
+            }),
         }
     }
 
@@ -1270,7 +1286,7 @@ impl Desktop {
 
     fn rename(&mut self, b: BoxId, old: &str, new: &str) {
         let Some(dir) = self.dir_of(b) else { return };
-        let target = match ops::validate_new_name(&dir, old, new) {
+        let target = match ops::validate_new_name(dir.parent_of(old), old, new) {
             Ok(t) => t,
             Err(e) => {
                 let text = match e {
@@ -1311,8 +1327,13 @@ impl Desktop {
             self.notice(b, t!("box.drop_portal"));
             return;
         }
-        let desktop = self.desktop_dir.clone();
-        let (names, outside) = split_desktop_items(paths, desktop.as_deref());
+        let dirs: Vec<PathBuf> = self
+            .desktop_dir
+            .iter()
+            .chain(self.public_dir.iter())
+            .cloned()
+            .collect();
+        let (names, outside) = split_desktop_items(paths, &dirs);
         if !names.is_empty() {
             let Some(x) = self.state.find_box(b) else {
                 return;
@@ -1394,15 +1415,15 @@ impl Desktop {
 }
 
 /// Noms des éléments du bureau parmi `paths`, et nombre de fichiers venus d'ailleurs.
-fn split_desktop_items(paths: &[PathBuf], desktop: Option<&Path>) -> (Vec<String>, usize) {
+fn split_desktop_items(paths: &[PathBuf], desktop: &[PathBuf]) -> (Vec<String>, usize) {
     let resolve = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let desktop = desktop.map(resolve);
+    let desktop: Vec<PathBuf> = desktop.iter().map(|d| resolve(d)).collect();
     let mut names = Vec::new();
     let mut outside = 0;
     for path in paths {
         let parent = path.parent().map(resolve);
-        match (&desktop, parent, path.file_name()) {
-            (Some(d), Some(p), Some(name)) if *d == p => {
+        match (parent, path.file_name()) {
+            (Some(p), Some(name)) if desktop.contains(&p) => {
                 let name = name.to_string_lossy().into_owned();
                 if !names.contains(&name) {
                     names.push(name);
@@ -1588,7 +1609,7 @@ impl eframe::App for Desktop {
                 b,
                 look: &look,
                 sections: &sections,
-                dir: dir.as_deref(),
+                dir: dir.as_ref(),
                 portal: portal_view,
                 rolled: win.rolled,
                 drop_target: drop_target == Some(id)
@@ -1706,11 +1727,16 @@ mod tests {
                 other.join("c.txt"),
                 desktop.join("b.png"),
             ],
-            Some(&desktop),
+            std::slice::from_ref(&desktop),
         );
         assert_eq!(names, ["a.pdf", "b.png"]);
         assert_eq!(outside, 1);
-        let (names, outside) = split_desktop_items(&[desktop.join("a.pdf")], None);
+        // Bureau public : ses éléments sont aussi du bureau.
+        let (names, outside) =
+            split_desktop_items(&[other.join("c.txt")], &[desktop.clone(), other.clone()]);
+        assert_eq!(names, ["c.txt"]);
+        assert_eq!(outside, 0);
+        let (names, outside) = split_desktop_items(&[desktop.join("a.pdf")], &[]);
         assert!(names.is_empty());
         assert_eq!(outside, 1);
     }

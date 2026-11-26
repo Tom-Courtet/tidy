@@ -31,10 +31,17 @@ pub const OFFSCREEN: IconPos = IconPos {
     y: -30_000,
 };
 
+/// Second essai si l'Explorateur refuse les positions négatives : loin à droite et en
+/// bas.
+pub const OFFSCREEN_ALT: IconPos = IconPos {
+    x: 30_000,
+    y: 30_000,
+};
+
 impl IconPos {
     /// L'icône est-elle hors de l'écran (déjà masquée) ?
     pub fn is_offscreen(self) -> bool {
-        self.x <= OFFSCREEN.x / 2 && self.y <= OFFSCREEN.y / 2
+        self.x.abs() >= OFFSCREEN_ALT.x / 2 || self.y.abs() >= OFFSCREEN_ALT.y / 2
     }
 }
 
@@ -47,6 +54,14 @@ pub trait DesktopIcons {
     /// Disposition automatique activée (elle empêche de placer les icônes) ?
     fn auto_arrange(&self) -> Result<bool>;
     fn set_auto_arrange(&self, on: bool) -> Result<()>;
+    /// « Aligner les icônes sur la grille » activé (il peut ramener une icône à
+    /// l'écran) ?
+    fn snap_to_grid(&self) -> Result<bool> {
+        Ok(false)
+    }
+    fn set_snap_to_grid(&self, _on: bool) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Journal des positions d'origine (`icon-stash.json`).
@@ -60,6 +75,10 @@ pub struct IconStash {
     /// masqué.
     #[serde(default)]
     pub auto_arrange_was_on: bool,
+    /// Tidy a coupé l'alignement sur la grille (une icône revenait à l'écran) : à
+    /// rétablir quand plus rien n'est masqué.
+    #[serde(default)]
+    pub snap_was_on: bool,
 }
 
 impl Default for IconStash {
@@ -68,6 +87,7 @@ impl Default for IconStash {
             schema_version: Self::CURRENT_VERSION,
             original: BTreeMap::new(),
             auto_arrange_was_on: false,
+            snap_was_on: false,
         }
     }
 }
@@ -92,14 +112,48 @@ fn find<'a>(list: &'a [(PathBuf, IconPos)], path: &Path) -> Option<&'a (PathBuf,
 pub struct SyncReport {
     pub hidden: usize,
     pub restored: usize,
+    /// Icônes du bureau vues par le système.
+    pub on_desktop: usize,
+    /// Éléments rangés que le système ne montre pas sur le bureau (chemin différent,
+    /// élément disparu) : rien à masquer.
+    pub not_found: Vec<PathBuf>,
+    /// Icônes rangées restées à l'écran malgré tous les essais.
+    pub stuck: Vec<PathBuf>,
+}
+
+/// Verrou entre processus : l'agent et le bureau synchronisent chacun de leur côté ;
+/// sans lui, l'un pourrait réécrire le journal sans les positions notées par l'autre.
+fn lock(store: &Store) -> Result<std::fs::File> {
+    let path = store.path_of::<IconStash>().with_extension("lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    file.lock()?;
+    Ok(file)
+}
+
+/// Icônes de `wanted` encore à l'écran.
+fn still_visible(icons: &dyn DesktopIcons, wanted: &[(PathBuf, IconPos)]) -> Result<Vec<PathBuf>> {
+    let now = icons.positions()?;
+    Ok(wanted
+        .iter()
+        .filter(|(path, _)| find(&now, path).is_some_and(|(_, pos)| !pos.is_offscreen()))
+        .map(|(path, _)| path.clone())
+        .collect())
 }
 
 /// Masque les icônes de `boxed` (éléments rangés) et rend toutes les autres icônes
 /// masquées par Tidy. `boxed` vide : tout est rendu.
 pub fn sync(store: &Store, icons: &dyn DesktopIcons, boxed: &[PathBuf]) -> Result<SyncReport> {
+    let _lock = lock(store)?;
     let mut stash: IconStash = store.load();
     let current = icons.positions()?;
-    let mut report = SyncReport::default();
+    let mut report = SyncReport {
+        on_desktop: current.len(),
+        ..SyncReport::default()
+    };
 
     // 1. Rendre ce qui n'est plus rangé (ou plus sur le bureau).
     let mut back = Vec::new();
@@ -121,6 +175,7 @@ pub fn sync(store: &Store, icons: &dyn DesktopIcons, boxed: &[PathBuf]) -> Resul
     let mut away = Vec::new();
     for path in boxed {
         let Some((real, pos)) = find(&current, path) else {
+            report.not_found.push(path.clone());
             continue;
         };
         if pos.is_offscreen() {
@@ -139,12 +194,36 @@ pub fn sync(store: &Store, icons: &dyn DesktopIcons, boxed: &[PathBuf]) -> Resul
     if !away.is_empty() {
         icons.move_icons(&away)?;
         report.hidden = away.len();
+        // L'Explorateur peut refuser la position : vérifier, puis réessayer sans
+        // l'alignement sur la grille, puis de l'autre côté de l'écran.
+        let mut stuck = still_visible(icons, &away)?;
+        if !stuck.is_empty() && icons.snap_to_grid()? {
+            stash.snap_was_on = true;
+            store.save(&stash)?;
+            icons.set_snap_to_grid(false)?;
+            let retry: Vec<_> = stuck.iter().map(|p| (p.clone(), OFFSCREEN)).collect();
+            icons.move_icons(&retry)?;
+            stuck = still_visible(icons, &retry)?;
+        }
+        if !stuck.is_empty() {
+            let retry: Vec<_> = stuck.iter().map(|p| (p.clone(), OFFSCREEN_ALT)).collect();
+            icons.move_icons(&retry)?;
+            stuck = still_visible(icons, &retry)?;
+        }
+        report.hidden -= stuck.len();
+        report.stuck = stuck;
     }
 
-    // 3. Plus rien de masqué : rétablir la disposition automatique si Tidy l'avait coupée.
-    if stash.original.is_empty() && stash.auto_arrange_was_on {
-        icons.set_auto_arrange(true)?;
-        stash.auto_arrange_was_on = false;
+    // 3. Plus rien de masqué : rétablir ce que Tidy avait coupé.
+    if stash.original.is_empty() && (stash.auto_arrange_was_on || stash.snap_was_on) {
+        if stash.snap_was_on {
+            icons.set_snap_to_grid(true)?;
+            stash.snap_was_on = false;
+        }
+        if stash.auto_arrange_was_on {
+            icons.set_auto_arrange(true)?;
+            stash.auto_arrange_was_on = false;
+        }
         store.save(&stash)?;
     }
     Ok(report)
@@ -168,6 +247,12 @@ mod tests {
     struct Fake {
         icons: RefCell<Vec<(PathBuf, IconPos)>>,
         auto: RefCell<bool>,
+        snap: RefCell<bool>,
+        /// Comme l'Explorateur avec l'alignement sur la grille : refuse les positions
+        /// négatives.
+        refuse_negative_with_snap: bool,
+        /// Refuse toute position hors de l'écran.
+        refuse_offscreen: bool,
     }
 
     impl Fake {
@@ -194,6 +279,12 @@ mod tests {
                 "déplacement avec la disposition automatique"
             );
             for (path, pos) in moves {
+                let negative = pos.x < 0 || pos.y < 0;
+                if self.refuse_offscreen && pos.is_offscreen()
+                    || self.refuse_negative_with_snap && *self.snap.borrow() && negative
+                {
+                    continue;
+                }
                 if let Some(icon) = self
                     .icons
                     .borrow_mut()
@@ -210,6 +301,13 @@ mod tests {
         }
         fn set_auto_arrange(&self, on: bool) -> Result<()> {
             *self.auto.borrow_mut() = on;
+            Ok(())
+        }
+        fn snap_to_grid(&self) -> Result<bool> {
+            Ok(*self.snap.borrow())
+        }
+        fn set_snap_to_grid(&self, on: bool) -> Result<()> {
+            *self.snap.borrow_mut() = on;
             Ok(())
         }
     }
@@ -230,7 +328,8 @@ mod tests {
             report,
             SyncReport {
                 hidden: 1,
-                restored: 0
+                on_desktop: 2,
+                ..SyncReport::default()
             }
         );
         assert!(fake.pos(r"C:\Bureau\a.pdf").is_offscreen());
@@ -289,5 +388,40 @@ mod tests {
         let fake = Fake::with(&[(r"C:\Bureau\a.pdf", 10, 20)]);
         assert_eq!(restore_all(&store, &fake).unwrap(), 0);
         assert!(!store.path_of::<IconStash>().exists());
+    }
+
+    #[test]
+    fn snap_to_grid_is_turned_off_when_it_brings_icons_back() {
+        let (_dir, store) = store();
+        let mut fake = Fake::with(&[(r"C:\Bureau\a.pdf", 10, 20)]);
+        fake.refuse_negative_with_snap = true;
+        *fake.snap.borrow_mut() = true;
+        let report = sync(&store, &fake, &[PathBuf::from(r"C:\Bureau\a.pdf")]).unwrap();
+        assert_eq!(report.hidden, 1);
+        assert!(report.stuck.is_empty());
+        assert!(fake.pos(r"C:\Bureau\a.pdf").is_offscreen());
+        assert!(!*fake.snap.borrow());
+        restore_all(&store, &fake).unwrap();
+        assert_eq!(fake.pos(r"C:\Bureau\a.pdf"), IconPos { x: 10, y: 20 });
+        assert!(*fake.snap.borrow());
+    }
+
+    #[test]
+    fn refused_moves_are_reported() {
+        let (_dir, store) = store();
+        let mut fake = Fake::with(&[(r"C:\Bureau\a.pdf", 10, 20)]);
+        fake.refuse_offscreen = true;
+        let boxed = [
+            PathBuf::from(r"C:\Bureau\a.pdf"),
+            PathBuf::from(r"C:\Ailleurs\b.pdf"),
+        ];
+        let report = sync(&store, &fake, &boxed).unwrap();
+        assert_eq!(report.hidden, 0);
+        assert_eq!(report.stuck, vec![PathBuf::from(r"C:\Bureau\a.pdf")]);
+        assert_eq!(report.not_found, vec![PathBuf::from(r"C:\Ailleurs\b.pdf")]);
+        // La position d'origine reste notée : rien n'est perdu.
+        assert_eq!(fake.pos(r"C:\Bureau\a.pdf"), IconPos { x: 10, y: 20 });
+        restore_all(&store, &fake).unwrap();
+        assert_eq!(fake.pos(r"C:\Bureau\a.pdf"), IconPos { x: 10, y: 20 });
     }
 }

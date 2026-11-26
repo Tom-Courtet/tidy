@@ -174,16 +174,23 @@ fn main() -> Result<()> {
                 eprintln!("usage : tidy --hide-icon <nom d'un élément du bureau>");
                 std::process::exit(2);
             };
-            let Some(desktop) = tidy_core::store::desktop_dir() else {
+            let dirs = tidy_core::store::desktop_dirs();
+            let Some(path) = tidy_core::store::resolve_desktop_item(&dirs, &name) else {
                 anyhow::bail!("dossier du bureau introuvable");
             };
-            match icons::sync(&store, &[desktop.join(&name)]) {
+            match icons::sync(&store, &[path]) {
                 Some(report) => {
                     let report = report?;
                     println!(
-                        "{} icône(s) masquée(s). `tidy --restore-desktop` les remet à leur place.",
-                        report.hidden
+                        "{} icône(s) masquée(s) sur {} icône(s) du bureau. `tidy --restore-desktop` les remet à leur place.",
+                        report.hidden, report.on_desktop
                     );
+                    for path in &report.not_found {
+                        println!("absente du bureau de l'Explorateur : {}", path.display());
+                    }
+                    for path in &report.stuck {
+                        println!("restée à l'écran (déplacement refusé) : {}", path.display());
+                    }
                 }
                 None => println!("Pas disponible sur cet OS."),
             }

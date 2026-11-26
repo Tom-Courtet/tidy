@@ -184,14 +184,8 @@ impl App {
         // Icônes rangées : les masquer, rendre celles qui ne le sont plus (y compris
         // après un plantage). À part : l'Explorateur peut répondre lentement.
         let store = self.store.clone();
-        std::thread::spawn(move || match crate::icons::sync(&store, &[]) {
-            Some(Ok(r)) => log::info!(
-                "icônes rangées : {} masquées, {} rendues",
-                r.hidden,
-                r.restored
-            ),
-            Some(Err(e)) => log::warn!("icônes rangées : {e:#}"),
-            None => {}
+        std::thread::spawn(move || {
+            crate::icons::log_report(crate::icons::sync(&store, &[]), false);
         });
         if self.settings.quick_actions.double_click_to_hide {
             let proxy = std::sync::Mutex::new(self.proxy.clone());
