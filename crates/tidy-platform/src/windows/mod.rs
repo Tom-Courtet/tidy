@@ -6,10 +6,12 @@
 //! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
 //! - [`shell`] : icônes des fichiers, menu contextuel et glisser-déposer du Shell ;
 //! - [`watch`] : changements d'écrans ;
-//! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
+//! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
+//! - [`notify`] : notifications (toasts), lot H.
 
 mod desktop;
 mod icons;
+mod notify;
 mod registry;
 mod screens;
 mod shell;
@@ -177,6 +179,10 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         registry::set_login(enabled)
+    }
+
+    fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
+        notify::notify(title, body, sound)
     }
 }
 

@@ -2,6 +2,7 @@
 
 mod files;
 mod login;
+mod notify;
 pub mod reopen;
 mod screens;
 mod watch;
@@ -109,6 +110,10 @@ impl DesktopPlatform for MacPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         login::set(enabled)
+    }
+
+    fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
+        notify::notify(title, body, sound)
     }
 }
 
