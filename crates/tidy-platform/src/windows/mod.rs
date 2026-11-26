@@ -10,6 +10,7 @@
 //! - [`glass`] : fond « verre dépoli » des boîtes (lot M).
 //! - [`notify`] : notifications (toasts), lot H.
 //! - [`session`] : verrouillage de la session, veille, inactivité (lot F).
+//! - [`wallpaper`] : fonds d'écran (lot J).
 
 mod desktop;
 mod glass;
@@ -19,6 +20,7 @@ mod registry;
 mod screens;
 mod session;
 mod shell;
+mod wallpaper;
 mod watch;
 mod window;
 
@@ -207,6 +209,41 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn idle_seconds(&self) -> Option<f64> {
         session::idle_seconds()
+    }
+
+    // --- Lot J : fonds d'écran (`wallpaper.rs`). ---
+
+    fn wallpaper_snapshot(&self) -> Option<tidy_core::settings::wallpaper::OriginalWallpaper> {
+        wallpaper::snapshot()
+    }
+
+    fn set_wallpaper(
+        &self,
+        screen: Option<&tidy_core::screen::ScreenId>,
+        image: &Path,
+        fit: tidy_core::settings::wallpaper::Fit,
+        background: [u8; 3],
+    ) -> Result<()> {
+        wallpaper::set(screen, image, fit, background)
+    }
+
+    fn restore_wallpaper(
+        &self,
+        original: &tidy_core::settings::wallpaper::OriginalWallpaper,
+    ) -> Result<()> {
+        wallpaper::restore(original)
+    }
+
+    fn refresh_wallpaper(&self) {
+        wallpaper::refresh();
+    }
+
+    fn attach_wallpaper_window(&self, window: &dyn HasWindowHandle, frame: Rect) -> bool {
+        window::hwnd(window).is_some_and(|hwnd| wallpaper::attach(hwnd, frame))
+    }
+
+    fn system_activity(&self) -> crate::SystemActivity {
+        wallpaper::activity()
     }
 }
 

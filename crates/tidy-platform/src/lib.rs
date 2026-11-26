@@ -18,7 +18,8 @@ use std::path::Path;
 use anyhow::Result;
 use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
-use tidy_core::screen::Screen;
+use tidy_core::screen::{Screen, ScreenId};
+use tidy_core::settings::wallpaper::{Fit, OriginalWallpaper};
 
 mod convert;
 pub mod finder;
@@ -198,6 +199,59 @@ pub trait DesktopPlatform: Send + Sync {
     fn idle_seconds(&self) -> Option<f64> {
         None
     }
+    // --- Vague 3, lot J (fonds d'écran). Valeurs par défaut : « pas disponible ». ---
+
+    /// Fond d'écran actuel du système (par écran), pour le rendre plus tard. `None` :
+    /// illisible ici.
+    fn wallpaper_snapshot(&self) -> Option<OriginalWallpaper> {
+        None
+    }
+
+    /// Pose une image en fond d'écran sur `screen` (tous les écrans si `None`), avec
+    /// cet ajustement et cette couleur autour de l'image.
+    fn set_wallpaper(
+        &self,
+        _screen: Option<&ScreenId>,
+        _image: &Path,
+        _fit: Fit,
+        _background: [u8; 3],
+    ) -> Result<()> {
+        anyhow::bail!("fonds d'écran : pas disponible sur cet OS")
+    }
+
+    /// Rend un fond relevé par [`DesktopPlatform::wallpaper_snapshot`].
+    fn restore_wallpaper(&self, _original: &OriginalWallpaper) -> Result<()> {
+        anyhow::bail!("fonds d'écran : pas disponible sur cet OS")
+    }
+
+    /// Redessine le fond du système (Windows : après la fermeture d'une fenêtre de fond
+    /// animé, dont la dernière image pourrait rester affichée).
+    fn refresh_wallpaper(&self) {}
+
+    /// Place la fenêtre d'un fond animé **derrière les icônes du bureau**, sur `frame`
+    /// (coordonnées en points). `false` si c'est impossible.
+    fn attach_wallpaper_window(&self, window: &dyn HasWindowHandle, frame: Rect) -> bool {
+        self.make_desktop_surface(window, frame, SurfaceLevel::Wallpaper);
+        true
+    }
+
+    /// État du système pour la pause intelligente des fonds animés.
+    fn system_activity(&self) -> SystemActivity {
+        SystemActivity::default()
+    }
+}
+
+/// État du système relevé pour la pause intelligente (lot J).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SystemActivity {
+    /// Une appli occupe tout un écran (jeu, vidéo, présentation).
+    pub fullscreen: bool,
+    /// Sur batterie.
+    pub on_battery: bool,
+    /// Charge de la batterie en %, si connue.
+    pub battery_percent: Option<u8>,
+    /// Session verrouillée.
+    pub locked: bool,
 }
 
 /// Événement de session (lot F).

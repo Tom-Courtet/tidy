@@ -22,6 +22,7 @@ mod report;
 mod search;
 mod shortcuts;
 mod vault;
+mod wallpapers;
 /// Page Widgets (lot H). Nommée autrement que `tidy_ui::widgets`, importé ici.
 #[path = "widgets.rs"]
 mod widgets_page;

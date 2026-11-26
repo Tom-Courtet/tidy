@@ -29,6 +29,7 @@ pub fn handle(
         "layouts" => super::layouts::handle(store, bus, &action, data),
 
         "search" => super::search::handle(bus, &action, data),
+        "wallpaper" => super::wallpaper::handle(&action),
         _ => {
             bus.publish(Event::Module {
                 module,

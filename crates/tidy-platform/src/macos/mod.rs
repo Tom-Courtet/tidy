@@ -8,6 +8,7 @@ mod notify;
 pub mod reopen;
 mod screens;
 mod session;
+mod wallpaper;
 mod watch;
 mod window;
 
@@ -141,6 +142,33 @@ impl DesktopPlatform for MacPlatform {
 
     fn idle_seconds(&self) -> Option<f64> {
         session::idle_seconds()
+    }
+
+    // --- Lot J : fonds d'écran (`wallpaper.rs`). ---
+
+    fn wallpaper_snapshot(&self) -> Option<tidy_core::settings::wallpaper::OriginalWallpaper> {
+        wallpaper::snapshot()
+    }
+
+    fn set_wallpaper(
+        &self,
+        screen: Option<&tidy_core::screen::ScreenId>,
+        image: &Path,
+        fit: tidy_core::settings::wallpaper::Fit,
+        background: [u8; 3],
+    ) -> Result<()> {
+        wallpaper::set(screen, image, fit, background)
+    }
+
+    fn restore_wallpaper(
+        &self,
+        original: &tidy_core::settings::wallpaper::OriginalWallpaper,
+    ) -> Result<()> {
+        wallpaper::restore(original)
+    }
+
+    fn system_activity(&self) -> crate::SystemActivity {
+        wallpaper::activity()
     }
 }
 

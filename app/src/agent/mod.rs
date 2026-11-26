@@ -16,6 +16,7 @@ pub mod organizer;
 pub mod search;
 mod supervisor;
 mod tray;
+pub mod wallpaper;
 mod watcher;
 
 use std::path::PathBuf;
@@ -84,6 +85,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
             let _ = proxy.send_event(UserEvent::LayoutsChanged);
         });
     }
+    wallpaper::start(store.clone(), bus.clone());
 
     let handler = {
         let proxy = proxy.clone();

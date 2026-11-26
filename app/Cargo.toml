@@ -39,6 +39,8 @@ rfd.workspace = true
 uuid.workspace = true
 # Boîte privée : coffre chiffré (lot F).
 tidy-vault.workspace = true
+# Fonds d'écran (lot J) : bibliothèque, playlist, lecteur vidéo.
+tidy-wallpaper.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

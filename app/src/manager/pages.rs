@@ -23,6 +23,7 @@ pub fn show(m: &mut Manager, ui: &mut egui::Ui) {
         Page::QuickActions => super::quick_actions::show(m, ui),
         Page::Layouts => super::layouts::show(m, ui),
         Page::Widgets => super::widgets_page::show(m, ui),
+        Page::Wallpapers => super::wallpapers::show(m, ui),
         Page::Options => options(m, ui),
         Page::Diagnostic => diagnostic(m, ui),
         Page::Search => super::search::show(m, ui),
