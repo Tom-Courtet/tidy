@@ -79,6 +79,22 @@ fn list(paths: &[PathBuf]) -> String {
     out.join(" ; ")
 }
 
+/// Secours (`tidy --restore-desktop`) : ramène à une place libre visible les icônes
+/// restées hors de l'écran sans entrée au journal (Windows). À appeler après
+/// [`restore_all`].
+pub fn rescue_offscreen(store: &Store) -> usize {
+    let Some(icons) = tidy_platform::current().desktop_icon_positions() else {
+        return 0;
+    };
+    match icon_stash::rescue_offscreen(store, icons) {
+        Ok(n) => n,
+        Err(e) => {
+            log::error!("icônes hors de l'écran non ramenées : {e:#}");
+            0
+        }
+    }
+}
+
 /// Rend toutes les icônes masquées par Tidy (quitter, désinstaller, secours).
 pub fn restore_all(store: &Store) -> usize {
     let Some(icons) = tidy_platform::current().desktop_icon_positions() else {

@@ -239,6 +239,101 @@ pub fn restore_all(store: &Store, icons: &dyn DesktopIcons) -> Result<usize> {
     sync(store, icons, &[]).map(|r| r.restored)
 }
 
+/// Pas par défaut de la grille des icônes, en unités du système (icônes moyennes de
+/// l'Explorateur à 100 %), si les icônes visibles ne permettent pas de l'estimer.
+const DEFAULT_CELL: IconPos = IconPos { x: 76, y: 100 };
+/// Lignes par colonne au moins (bureau vide ou presque).
+const MIN_ROWS: i32 = 6;
+
+/// Secours (`tidy --restore-desktop`) : ramène vers une place libre visible toute icône
+/// restée hors de l'écran sans entrée au journal (journal perdu, arrêt brutal pendant
+/// un masquage). Les icônes notées au journal sont rendues par [`restore_all`], à
+/// appeler d'abord. Rend le nombre d'icônes ramenées.
+pub fn rescue_offscreen(store: &Store, icons: &dyn DesktopIcons) -> Result<usize> {
+    let _lock = lock(store)?;
+    // Journal illisible : ses positions d'origine ne doivent pas être écrasées.
+    let stash: IconStash = if store.path_of::<IconStash>().exists() {
+        store.try_load()?
+    } else {
+        IconStash::default()
+    };
+    let current = icons.positions()?;
+    let lost: Vec<&PathBuf> = current
+        .iter()
+        .filter(|(path, pos)| pos.is_offscreen() && !stash.original.keys().any(|p| same(p, path)))
+        .map(|(path, _)| path)
+        .collect();
+    if lost.is_empty() {
+        return Ok(0);
+    }
+    let visible: Vec<IconPos> = current
+        .iter()
+        .map(|(_, pos)| *pos)
+        .filter(|pos| !pos.is_offscreen())
+        .collect();
+    let spots = free_spots(&visible, lost.len());
+    let moves: Vec<(PathBuf, IconPos)> = lost.into_iter().cloned().zip(spots).collect();
+    if icons.auto_arrange()? {
+        // La disposition automatique place elle-même les icônes : il suffit de la
+        // laisser faire après le déplacement.
+        icons.set_auto_arrange(false)?;
+        icons.move_icons(&moves)?;
+        icons.set_auto_arrange(true)?;
+    } else {
+        icons.move_icons(&moves)?;
+    }
+    Ok(moves.len())
+}
+
+/// `count` places libres de la grille des icônes, colonne par colonne depuis le coin
+/// en haut à gauche, à l'écart des icônes `visible`.
+fn free_spots(visible: &[IconPos], count: usize) -> Vec<IconPos> {
+    let step = |values: Vec<i32>, default: i32| -> i32 {
+        let mut values = values;
+        values.sort_unstable();
+        values.dedup();
+        values
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|d| *d >= 32)
+            .min()
+            .unwrap_or(default)
+            .clamp(32, 300)
+    };
+    let cell = IconPos {
+        x: step(visible.iter().map(|p| p.x).collect(), DEFAULT_CELL.x),
+        y: step(visible.iter().map(|p| p.y).collect(), DEFAULT_CELL.y),
+    };
+    let origin = IconPos {
+        x: visible.iter().map(|p| p.x).min().unwrap_or(0).max(0),
+        y: visible.iter().map(|p| p.y).min().unwrap_or(0).max(0),
+    };
+    let rows = visible
+        .iter()
+        .map(|p| (p.y - origin.y) / cell.y + 1)
+        .max()
+        .unwrap_or(0)
+        .max(MIN_ROWS);
+    let taken = |spot: IconPos| {
+        visible
+            .iter()
+            .any(|p| (p.x - spot.x).abs() < cell.x / 2 + 1 && (p.y - spot.y).abs() < cell.y / 2 + 1)
+    };
+    let mut spots = Vec::with_capacity(count);
+    let mut k = 0;
+    while spots.len() < count && k < 100_000 {
+        let spot = IconPos {
+            x: origin.x + (k / rows) * cell.x,
+            y: origin.y + (k % rows) * cell.y,
+        };
+        if !taken(spot) {
+            spots.push(spot);
+        }
+        k += 1;
+    }
+    spots
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -422,6 +517,53 @@ mod tests {
         restore_all(&store, &fake).unwrap();
         assert_eq!(fake.pos(r"C:\Bureau\a.pdf"), IconPos { x: 10, y: 20 });
         assert!(*fake.snap.borrow());
+    }
+
+    /// Icônes hors de l'écran sans entrée au journal : ramenées à une place libre,
+    /// visible, sans toucher aux icônes notées ni aux icônes visibles.
+    #[test]
+    fn lost_offscreen_icons_are_brought_back() {
+        let (_dir, store) = store();
+        let fake = Fake::with(&[
+            (r"C:\Bureau\a.pdf", 0, 0),
+            (r"C:\Bureau\b.pdf", 0, 100),
+            (r"C:\Bureau\notee.pdf", 0, 200),
+            (r"C:\Bureau\perdue.pdf", -30_000, -30_000),
+            (r"C:\Bureau\perdue2.pdf", 30_000, 30_000),
+        ]);
+        sync(&store, &fake, &[PathBuf::from(r"C:\Bureau\notee.pdf")]).unwrap();
+        assert_eq!(rescue_offscreen(&store, &fake).unwrap(), 2);
+        let lost = [
+            fake.pos(r"C:\Bureau\perdue.pdf"),
+            fake.pos(r"C:\Bureau\perdue2.pdf"),
+        ];
+        for pos in lost {
+            assert!(!pos.is_offscreen(), "{pos:?}");
+        }
+        assert_ne!(lost[0], lost[1]);
+        for taken in [IconPos { x: 0, y: 0 }, IconPos { x: 0, y: 100 }] {
+            assert!(!lost.contains(&taken));
+        }
+        // L'icône notée au journal attend `restore_all`, qui la remet à sa place.
+        assert!(fake.pos(r"C:\Bureau\notee.pdf").is_offscreen());
+        restore_all(&store, &fake).unwrap();
+        assert_eq!(fake.pos(r"C:\Bureau\notee.pdf"), IconPos { x: 0, y: 200 });
+        assert_eq!(rescue_offscreen(&store, &fake).unwrap(), 0);
+    }
+
+    #[test]
+    fn free_spots_skip_taken_cells() {
+        let visible = [IconPos { x: 10, y: 10 }, IconPos { x: 10, y: 110 }];
+        let spots = free_spots(&visible, 3);
+        assert_eq!(
+            spots,
+            [
+                IconPos { x: 10, y: 210 },
+                IconPos { x: 10, y: 310 },
+                IconPos { x: 10, y: 410 }
+            ]
+        );
+        assert_eq!(free_spots(&[], 1), [IconPos { x: 0, y: 0 }]);
     }
 
     #[test]

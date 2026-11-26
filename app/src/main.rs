@@ -161,7 +161,12 @@ fn main() -> Result<()> {
             if stashed > 0 {
                 println!("{stashed} icône(s) rangée(s) remise(s) à leur place.");
             }
-            if finder || explorer || stashed > 0 {
+            // Icônes encore hors de l'écran sans entrée au journal (Windows).
+            let rescued = icons::rescue_offscreen(&store);
+            if rescued > 0 {
+                println!("{rescued} icône(s) hors de l'écran ramenée(s) sur le bureau.");
+            }
+            if finder || explorer || stashed > 0 || rescued > 0 {
                 println!("Icônes du bureau rétablies.");
             } else {
                 println!("Tidy n'avait pas masqué les icônes du bureau : rien à faire.");

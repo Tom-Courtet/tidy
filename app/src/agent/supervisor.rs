@@ -67,6 +67,9 @@ pub struct Shared {
     pub pending: Vec<tidy_core::DesktopCommand>,
     /// Lancement du bureau, pour le délai de secours de [`super::organizer::flush_late`].
     pub started_at: Option<Instant>,
+    /// Le superviseur a renoncé au bureau (trop d'arrêts) : les icônes rangées ont été
+    /// rendues et ne doivent plus être masquées jusqu'au prochain réglage.
+    pub gave_up: bool,
 }
 
 #[derive(Clone)]
@@ -160,6 +163,7 @@ impl Worker {
         log::info!("mode du bureau : {mode:?}");
         self.mode = mode;
         self.gave_up = false;
+        self.set_gave_up(false);
         self.crashes.clear();
         match mode {
             DesktopMode::Off => {
@@ -277,6 +281,9 @@ impl Worker {
                 "le bureau s'est arrêté {MAX_CRASHES} fois en une minute : Tidy rend les icônes du Finder et n'insiste pas"
             );
             self.gave_up = true;
+            // Avant de rendre les icônes : une resynchronisation en attente ne les
+            // remasquera pas.
+            self.set_gave_up(true);
             self.restore_finder();
             crate::icons::restore_all(&self.store);
             return;
@@ -296,6 +303,13 @@ impl Worker {
         if let Err(e) = finder::restore_icons(&SystemFinder, &self.store.finder_marker_path()) {
             log::error!("icônes du Finder non rétablies : {e:#} (essayer `tidy --restore-finder`)");
         }
+    }
+
+    fn set_gave_up(&self, gave_up: bool) {
+        self.shared
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .gave_up = gave_up;
     }
 
     /// Note le lancement ou l'arrêt du bureau. À l'arrêt, les commandes qu'il n'a pas

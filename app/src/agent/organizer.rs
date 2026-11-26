@@ -312,8 +312,17 @@ pub(super) fn send(
     Ok(())
 }
 
+/// Le superviseur a-t-il renoncé au bureau (trop d'arrêts) ?
+fn desktop_gave_up() -> bool {
+    SHARED
+        .get()
+        .is_some_and(|s| s.lock().is_ok_and(|s| s.gave_up))
+}
+
 /// Icônes rangées masquées, les autres rendues (Windows). À part : l'Explorateur peut
-/// répondre lentement, et le bureau doit d'abord avoir enregistré l'état.
+/// répondre lentement, et le bureau doit d'abord avoir enregistré l'état. Rien après
+/// l'abandon du bureau par le superviseur : les icônes rendues resteraient sinon
+/// masquées sans boîte pour les montrer.
 fn sync_icons(store: &Store, desktop_running: bool) {
     // Jamais pendant les tests : ce serait le vrai bureau de la machine.
     if cfg!(test) {
@@ -333,6 +342,10 @@ fn sync_icons(store: &Store, desktop_running: bool) {
                 std::thread::sleep(Duration::from_millis(200));
             }
             std::thread::sleep(DESKTOP_SAVE_DELAY);
+        }
+        if desktop_gave_up() {
+            log::debug!("icônes rangées : bureau abandonné, rien n'est masqué");
+            return;
         }
         crate::icons::log_report(crate::icons::sync(&store, &[]), true);
     });
