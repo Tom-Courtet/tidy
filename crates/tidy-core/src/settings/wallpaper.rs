@@ -179,7 +179,8 @@ impl Default for WallpaperSettings {
 }
 
 impl WallpaperSettings {
-    /// Choix qui s'applique à l'écran `screen`.
+    /// Choix qui s'applique à l'écran `screen`. Un par écran : un écran sans choix
+    /// propre garde celui de tous les écrans.
     pub fn choice_for(&self, screen: &str) -> &Choice {
         if self.same_on_all {
             return &self.all;
@@ -187,17 +188,22 @@ impl WallpaperSettings {
         self.screens
             .iter()
             .find(|s| s.screen == screen)
-            .map_or(&Choice::None, |s| &s.choice)
+            .map_or(&self.all, |s| &s.choice)
     }
 
     /// Donne `choice` à l'écran `screen` (ou à tous si `screen` est `None`, ce qui
-    /// passe en « le même partout »).
+    /// passe en « le même partout »). En passant en « un par écran », les autres écrans
+    /// gardent ce qu'ils montraient (le choix de tous les écrans) : les choix par écran
+    /// d'une fois précédente sont oubliés.
     pub fn set_choice(&mut self, screen: Option<&str>, choice: Choice) {
         let Some(screen) = screen else {
             self.same_on_all = true;
             self.all = choice;
             return;
         };
+        if self.same_on_all {
+            self.screens.clear();
+        }
         self.same_on_all = false;
         match self.screens.iter_mut().find(|s| s.screen == screen) {
             Some(s) => s.choice = choice,
@@ -208,13 +214,11 @@ impl WallpaperSettings {
         }
     }
 
-    /// Un écran au moins affiche la playlist ?
+    /// Un écran au moins affiche la playlist ? (Un par écran : les écrans sans choix
+    /// propre comptent avec le choix de tous les écrans.)
     pub fn uses_playlist(&self) -> bool {
-        if self.same_on_all {
-            self.all == Choice::Playlist
-        } else {
-            self.screens.iter().any(|s| s.choice == Choice::Playlist)
-        }
+        self.all == Choice::Playlist
+            || !self.same_on_all && self.screens.iter().any(|s| s.choice == Choice::Playlist)
     }
 
     /// Oublie un fond retiré de la bibliothèque (choix et playlist).
@@ -292,6 +296,23 @@ mod tests {
         s.set_choice(None, Choice::Playlist);
         assert_eq!(s.choice_for("b"), &Choice::Playlist);
         assert!(s.uses_playlist());
+    }
+
+    /// Passer en « un par écran » ne vide pas les autres écrans.
+    #[test]
+    fn other_screens_keep_their_wallpaper_when_going_per_screen() {
+        let mut s = WallpaperSettings::default();
+        let (x, y) = (Uuid::new_v4(), Uuid::new_v4());
+        // Choix par écran d'une fois précédente : oubliés au retour en « un par écran ».
+        s.set_choice(Some("b"), Choice::Color { rgb: [1, 2, 3] });
+        s.set_choice(None, Choice::Item { id: x });
+        s.set_choice(Some("a"), Choice::Item { id: y });
+        assert_eq!(s.choice_for("a"), &Choice::Item { id: y });
+        assert_eq!(s.choice_for("b"), &Choice::Item { id: x });
+        assert_eq!(s.choice_for("c"), &Choice::Item { id: x });
+        // « Vider » un écran reste possible.
+        s.set_choice(Some("b"), Choice::None);
+        assert_eq!(s.choice_for("b"), &Choice::None);
     }
 
     #[test]
