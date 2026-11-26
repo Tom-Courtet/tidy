@@ -5,12 +5,18 @@
 //! s'affichent donc dans une fenêtre flottante à part (voir [`super::overlay`]), et les
 //! sous-menus (« Trier par ▸ ») y remplacent le menu principal, avec une entrée
 //! « Retour ». Le contenu est décrit par des données ([`Entry`]), testées.
+//!
+//! Le menu ☰ suit celui de l'original : « Créer une boîte ▸ », « Affichage ▸ »,
+//! « Trier par ▸ », « Règles ▸ », puis les réglages de la boîte (apparence, réglages,
+//! icônes, nom, gel) et sa suppression.
 
 use egui::{Align2, CornerRadius, FontId, Sense, Ui, vec2};
+use tidy_core::category::Category;
 use tidy_core::model::{BoxId, BoxKind, DeskBox, SortKey, ViewMode};
 use tidy_ui::{icons, t, theme};
 
 use super::action::Action;
+use super::targets::{self, Targets};
 
 /// Largeur d'un menu.
 pub const WIDTH: f32 = 252.0;
@@ -29,6 +35,21 @@ pub enum Page {
     Sort,
     View,
     Merge,
+    /// « Créer une boîte ▸ ».
+    Create,
+    /// « Règles ▸ ».
+    Rules,
+    /// « Règles ▸ Ranger ici ▸ » : les catégories de la page Rangement.
+    RulesTargets,
+}
+
+/// Ce que le menu ☰ doit savoir en plus de la boîte.
+pub struct MenuCx<'a> {
+    /// Les autres boîtes ordinaires (pour « Fusionner avec »).
+    pub others: &'a [(BoxId, String)],
+    pub icon_size: f32,
+    /// Ce qui est rangé dans cette boîte (page Rangement).
+    pub targets: &'a Targets,
 }
 
 /// Ce que fait une entrée.
@@ -147,29 +168,40 @@ pub fn item_menu(b: BoxId, names: &[String], portal: bool) -> Vec<Entry> {
     entries
 }
 
-/// Menu ☰ d'une boîte, à la page `page`. `others` : les autres boîtes ordinaires
-/// (pour « Fusionner avec »).
-pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: f32) -> Vec<Entry> {
+/// Menu ☰ d'une boîte, à la page `page`.
+pub fn box_menu(b: &DeskBox, page: Page, cx: &MenuCx) -> Vec<Entry> {
     let id = b.id;
     let normal = matches!(b.kind, BoxKind::Normal);
+    let others = cx.others;
     match page {
         Page::Main => {
             let mut e = vec![
                 item(
-                    icons::EDIT,
-                    t!("box.menu_rename_box"),
-                    EntryKind::Do(Action::StartRenameBox { b: id }),
+                    icons::PLUS,
+                    t!("box_extra.menu_create"),
+                    EntryKind::Open(Page::Create),
+                ),
+                Entry::Separator,
+                item(
+                    icons::GRID,
+                    t!("box.menu_view"),
+                    EntryKind::Open(Page::View),
                 ),
                 item(
                     icons::SORT,
                     t!("box.menu_sort"),
                     EntryKind::Open(Page::Sort),
                 ),
-                item(
-                    icons::GRID,
-                    t!("box.menu_view"),
-                    EntryKind::Open(Page::View),
-                ),
+            ];
+            if normal {
+                e.push(item(
+                    icons::AUTO_TIDY,
+                    t!("box_extra.menu_rules"),
+                    EntryKind::Open(Page::Rules),
+                ));
+            }
+            e.extend([
+                Entry::Separator,
                 if b.rolled_up {
                     item(
                         icons::ROLL_DOWN,
@@ -190,7 +222,7 @@ pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: 
                     Action::ToggleAutoRoll { b: id },
                 ),
                 Entry::Separator,
-            ];
+            ]);
             if normal {
                 e.push(item(
                     icons::TABS,
@@ -223,17 +255,25 @@ pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: 
                     EntryKind::Do(Action::Appearance { b: id }),
                 ),
                 item(
-                    icons::PORTAL,
-                    t!("box.menu_new_portal"),
-                    EntryKind::Do(Action::NewPortal { near: id }),
+                    icons::SETTINGS,
+                    t!("box_extra.menu_settings"),
+                    EntryKind::Do(Action::BoxSettings { b: id }),
                 ),
                 item(
-                    icons::PLUS,
-                    t!("box.menu_new_box"),
-                    EntryKind::Do(Action::NewBox {
-                        near: Some(id),
-                        rect: None,
-                    }),
+                    icons::REFRESH,
+                    t!("box_extra.menu_refresh_icons"),
+                    EntryKind::Do(Action::RefreshIcons { b: id }),
+                ),
+                item(
+                    icons::EDIT,
+                    t!("box.menu_rename_box"),
+                    EntryKind::Do(Action::StartRenameBox { b: id }),
+                ),
+                check(
+                    icons::LOCK,
+                    t!("box_extra.menu_freeze"),
+                    b.frozen,
+                    Action::ToggleFreeze { b: id },
                 ),
                 Entry::Separator,
                 Entry::Item {
@@ -244,6 +284,76 @@ pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: 
                     danger: true,
                 },
             ]);
+            e
+        }
+        Page::Create => vec![
+            back(),
+            Entry::Separator,
+            item(
+                icons::BOX,
+                t!("box_extra.create_box"),
+                EntryKind::Do(Action::NewBox {
+                    near: Some(id),
+                    rect: None,
+                }),
+            ),
+            item(
+                icons::PORTAL,
+                t!("box_extra.create_portal"),
+                EntryKind::Do(Action::NewPortal { near: id }),
+            ),
+            // Lot F : « Boîte privée »
+        ],
+        Page::Rules => vec![
+            back(),
+            Entry::Separator,
+            item(
+                icons::INBOX,
+                t!("box_extra.rules_apply"),
+                EntryKind::Do(Action::ApplyRules),
+            ),
+            item(
+                icons::FILTER,
+                t!("box_extra.rules_targets"),
+                EntryKind::Open(Page::RulesTargets),
+            ),
+            Entry::Separator,
+            item(
+                icons::SETTINGS,
+                t!("box_extra.rules_open"),
+                EntryKind::Do(Action::OpenRules),
+            ),
+        ],
+        Page::RulesTargets => {
+            let mut e = vec![
+                item(
+                    icons::BACK,
+                    t!("box.menu_back"),
+                    EntryKind::Open(Page::Rules),
+                ),
+                Entry::Separator,
+            ];
+            for category in Category::ALL {
+                e.push(check(
+                    targets::icon(category),
+                    targets::label(category),
+                    cx.targets.categories.contains(&category),
+                    Action::ToggleRuleTarget {
+                        b: id,
+                        category: Some(category),
+                    },
+                ));
+            }
+            e.push(Entry::Separator);
+            e.push(check(
+                icons::INBOX,
+                t!("box_extra.rules_catch_all"),
+                cx.targets.catch_all,
+                Action::ToggleRuleTarget {
+                    b: id,
+                    category: None,
+                },
+            ));
             e
         }
         Page::Sort => {
@@ -318,10 +428,31 @@ pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: 
                 e.push(check(
                     icons::IMAGE,
                     label,
-                    (icon_size - size).abs() < 0.5,
+                    (cx.icon_size - size).abs() < 0.5,
                     Action::SetIconSize { b: id, size },
                 ));
             }
+            e.extend([
+                Entry::Separator,
+                check(
+                    icons::SEARCH,
+                    t!("box_extra.view_search"),
+                    b.search_in_title,
+                    Action::ToggleSearchInTitle { b: id },
+                ),
+                check(
+                    icons::EYE_OFF,
+                    t!("box_extra.view_exclude_quick_hide"),
+                    b.exclude_from_quick_hide,
+                    Action::ToggleExcludeQuickHide { b: id },
+                ),
+                check(
+                    icons::ZAP,
+                    t!("box_extra.view_exclude_quick_access"),
+                    b.exclude_from_quick_access,
+                    Action::ToggleExcludeQuickAccess { b: id },
+                ),
+            ]);
             e
         }
         Page::Merge => {
@@ -417,7 +548,8 @@ pub fn draw(ui: &mut Ui, entries: &[Entry]) -> Option<EntryKind> {
                             theme::ACCENT_2,
                         );
                     }
-                    (EntryKind::Open(page), _) if *page != Page::Main => {
+                    // Sous-menu (pas une entrée « Retour »).
+                    (EntryKind::Open(_), _) if *icon != icons::BACK => {
                         painter.text(
                             right,
                             Align2::RIGHT_CENTER,
@@ -442,6 +574,39 @@ mod tests {
     use super::*;
     use tidy_core::model::Tab;
 
+    fn menu(b: &DeskBox, page: Page, others: &[(BoxId, String)]) -> Vec<Entry> {
+        menu_with(b, page, others, &Targets::default())
+    }
+
+    fn menu_with(
+        b: &DeskBox,
+        page: Page,
+        others: &[(BoxId, String)],
+        targets: &Targets,
+    ) -> Vec<Entry> {
+        box_menu(
+            b,
+            page,
+            &MenuCx {
+                others,
+                icon_size: 48.0,
+                targets,
+            },
+        )
+    }
+
+    /// Entrée cochée (`Some`) ou simple (`None`) qui déclenche `action`.
+    fn checked_for(entries: &[Entry], action: &Action) -> Option<Option<bool>> {
+        entries.iter().find_map(|e| match e {
+            Entry::Item {
+                kind: EntryKind::Do(a),
+                checked,
+                ..
+            } if a == action => Some(*checked),
+            _ => None,
+        })
+    }
+
     fn actions(entries: &[Entry]) -> Vec<&EntryKind> {
         entries
             .iter()
@@ -455,7 +620,7 @@ mod tests {
     #[test]
     fn tab_entries_depend_on_the_box() {
         let mut b = DeskBox::new("A");
-        let main = box_menu(&b, Page::Main, &[], 48.0);
+        let main = menu(&b, Page::Main, &[]);
         let kinds = actions(&main);
         assert!(
             !kinds
@@ -465,7 +630,7 @@ mod tests {
         assert!(!kinds.contains(&&EntryKind::Open(Page::Merge)));
         b.tabs.push(Tab::new("Deux"));
         let other = (BoxId::new(), "B".to_owned());
-        let main = box_menu(&b, Page::Main, std::slice::from_ref(&other), 48.0);
+        let main = menu(&b, Page::Main, std::slice::from_ref(&other));
         let kinds = actions(&main);
         assert!(
             kinds
@@ -473,7 +638,7 @@ mod tests {
                 .any(|k| matches!(k, EntryKind::Do(Action::DetachTab { .. })))
         );
         assert!(kinds.contains(&&EntryKind::Open(Page::Merge)));
-        let merge = box_menu(&b, Page::Merge, std::slice::from_ref(&other), 48.0);
+        let merge = menu(&b, Page::Merge, std::slice::from_ref(&other));
         assert!(actions(&merge).contains(&&EntryKind::Do(Action::MergeWith {
             b: b.id,
             other: other.0
@@ -510,7 +675,7 @@ mod tests {
     fn current_choices_are_checked() {
         let mut b = DeskBox::new("A");
         b.sort.key = SortKey::Size;
-        let sort = box_menu(&b, Page::Sort, &[], 48.0);
+        let sort = menu(&b, Page::Sort, &[]);
         let checked: Vec<_> = sort
             .iter()
             .filter_map(|e| match e {
@@ -530,5 +695,127 @@ mod tests {
             })]
         );
         assert!(height(&sort) > 2.0 * PADDING);
+    }
+
+    #[test]
+    fn view_toggles_follow_the_box() {
+        let mut b = DeskBox::new("A");
+        let id = b.id;
+        let view = menu(&b, Page::View, &[]);
+        for action in [
+            Action::ToggleSearchInTitle { b: id },
+            Action::ToggleExcludeQuickHide { b: id },
+            Action::ToggleExcludeQuickAccess { b: id },
+        ] {
+            assert_eq!(checked_for(&view, &action), Some(Some(false)), "{action:?}");
+        }
+        b.search_in_title = true;
+        b.exclude_from_quick_hide = true;
+        b.exclude_from_quick_access = true;
+        let view = menu(&b, Page::View, &[]);
+        for action in [
+            Action::ToggleSearchInTitle { b: id },
+            Action::ToggleExcludeQuickHide { b: id },
+            Action::ToggleExcludeQuickAccess { b: id },
+        ] {
+            assert_eq!(checked_for(&view, &action), Some(Some(true)), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn freeze_is_a_check_in_the_main_menu() {
+        let mut b = DeskBox::new("A");
+        let freeze = Action::ToggleFreeze { b: b.id };
+        assert_eq!(
+            checked_for(&menu(&b, Page::Main, &[]), &freeze),
+            Some(Some(false))
+        );
+        b.frozen = true;
+        assert_eq!(
+            checked_for(&menu(&b, Page::Main, &[]), &freeze),
+            Some(Some(true))
+        );
+        // Réglages, actualiser les icônes : entrées simples.
+        let main = menu(&b, Page::Main, &[]);
+        assert_eq!(
+            checked_for(&main, &Action::BoxSettings { b: b.id }),
+            Some(None)
+        );
+        assert_eq!(
+            checked_for(&main, &Action::RefreshIcons { b: b.id }),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn submenus_create_and_rules() {
+        let b = DeskBox::new("A");
+        let main = menu(&b, Page::Main, &[]);
+        let kinds = actions(&main);
+        assert!(kinds.contains(&&EntryKind::Open(Page::Create)));
+        assert!(kinds.contains(&&EntryKind::Open(Page::Rules)));
+        let create = menu(&b, Page::Create, &[]);
+        let kinds = actions(&create);
+        assert!(kinds.contains(&&EntryKind::Do(Action::NewBox {
+            near: Some(b.id),
+            rect: None
+        })));
+        assert!(kinds.contains(&&EntryKind::Do(Action::NewPortal { near: b.id })));
+        let rules = menu(&b, Page::Rules, &[]);
+        let kinds = actions(&rules);
+        assert!(kinds.contains(&&EntryKind::Do(Action::ApplyRules)));
+        assert!(kinds.contains(&&EntryKind::Do(Action::OpenRules)));
+        assert!(kinds.contains(&&EntryKind::Open(Page::RulesTargets)));
+        // Un portail ne reçoit pas de règles.
+        let mut portal = DeskBox::new("P");
+        portal.kind = BoxKind::Portal {
+            path: std::path::PathBuf::from("/tmp"),
+        };
+        let kinds = actions(&menu(&portal, Page::Main, &[]))
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(!kinds.contains(&EntryKind::Open(Page::Rules)));
+    }
+
+    #[test]
+    fn rule_targets_are_checked() {
+        let b = DeskBox::new("A");
+        let targets = Targets {
+            categories: vec![Category::Image],
+            catch_all: true,
+        };
+        let page = menu_with(&b, Page::RulesTargets, &[], &targets);
+        let image = Action::ToggleRuleTarget {
+            b: b.id,
+            category: Some(Category::Image),
+        };
+        let music = Action::ToggleRuleTarget {
+            b: b.id,
+            category: Some(Category::Music),
+        };
+        let rest = Action::ToggleRuleTarget {
+            b: b.id,
+            category: None,
+        };
+        assert_eq!(checked_for(&page, &image), Some(Some(true)));
+        assert_eq!(checked_for(&page, &music), Some(Some(false)));
+        assert_eq!(checked_for(&page, &rest), Some(Some(true)));
+        // Une entrée par catégorie, plus le fourre-tout.
+        let checks = page
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    Entry::Item {
+                        checked: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(checks, Category::ALL.len() + 1);
+        // « Retour » ramène au sous-menu Règles.
+        assert!(actions(&page).contains(&&EntryKind::Open(Page::Rules)));
     }
 }

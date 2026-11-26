@@ -30,6 +30,10 @@ mod portal;
 mod roll;
 mod textures;
 mod widgets;
+// Lot M : recherche dans le titre, gel, règles, verre dépoli.
+mod extras;
+mod search;
+mod targets;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -287,6 +291,8 @@ struct BoxWindow {
     sections_key: (u64, u64),
     /// Grille libre affichée, en coordonnées globales (case visée par un dépôt).
     grid: Option<GridGeom>,
+    /// Fond « verre dépoli » demandé au système (lot M).
+    glass: extras::GlassState,
 }
 
 impl BoxWindow {
@@ -497,6 +503,7 @@ impl Desktop {
                     sections: Vec::new(),
                     sections_key: (u64::MAX, u64::MAX),
                     grid: None,
+                    glass: extras::GlassState::default(),
                 }
             });
             if let BoxKind::Portal { path } = &b.kind {
@@ -827,7 +834,13 @@ impl Desktop {
             .as_ref()
             .unwrap_or(&settings.default_appearance)
             .icon_size;
-        menu::box_menu(deskbox, page, &others, icon_size)
+        let targets = targets::targets_of(&settings.organization, b);
+        let cx = menu::MenuCx {
+            others: &others,
+            icon_size,
+            targets: &targets,
+        };
+        menu::box_menu(deskbox, page, &cx)
     }
 
     /// Relit le cadre de la fenêtre ; une fois stable, l'aimante puis l'enregistre.
@@ -965,6 +978,10 @@ impl Desktop {
 
     /// Applique une demande de l'utilisateur.
     fn apply(&mut self, action: Action) {
+        if self.apply_extra(&action) {
+            self.generation += 1;
+            return;
+        }
         let platform = tidy_platform::current();
         match action {
             Action::Open { b, names } => {
@@ -1146,7 +1163,7 @@ impl Desktop {
             }
             Action::ToggleRoll { b } => self.edit_box(b, |x| x.rolled_up = !x.rolled_up),
             Action::ToggleAutoRoll { b } => self.edit_box(b, |x| x.auto_roll = !x.auto_roll),
-            Action::Appearance { .. } => open_manager("boxes"),
+            Action::Appearance { b } => open_manager(&extras::boxes_page_arg(b)),
             Action::NewPortal { near } => self.new_portal(near),
             Action::NewBox { near, rect } => match (rect, near) {
                 (Some(r), _) => {
@@ -1269,6 +1286,15 @@ impl Desktop {
             Action::DismissUnassigned => {
                 self.overlay.dismiss_unassigned(self.state.unassigned.len());
             }
+            // Lot M : déjà traitées par `apply_extra`.
+            Action::ToggleSearchInTitle { .. }
+            | Action::ToggleFreeze { .. }
+            | Action::ToggleExcludeQuickHide { .. }
+            | Action::ToggleExcludeQuickAccess { .. }
+            | Action::RefreshIcons { .. }
+            | Action::ToggleRuleTarget { .. }
+            | Action::OpenRules
+            | Action::BoxSettings { .. } => {}
         }
         self.generation += 1;
     }
@@ -1592,7 +1618,8 @@ fn default_rect(screens: &[Screen], i: usize) -> Rect {
     .clamped_to(&v)
 }
 
-fn box_builder(win: &BoxWindow) -> ViewportBuilder {
+/// `frozen` : boîte gelée, que le système ne doit pas laisser redimensionner.
+fn box_builder(win: &BoxWindow, frozen: bool) -> ViewportBuilder {
     let min = if win.rolled {
         [boxwin::MIN_SIZE[0], TITLE_HEIGHT]
     } else {
@@ -1602,7 +1629,7 @@ fn box_builder(win: &BoxWindow) -> ViewportBuilder {
         .with_title(&win.title)
         .with_decorations(false)
         .with_transparent(true)
-        .with_resizable(!win.rolled)
+        .with_resizable(!win.rolled && !frozen)
         .with_has_shadow(false)
         .with_taskbar(false)
         .with_position([win.spawn.x, win.spawn.y])
@@ -1653,7 +1680,7 @@ impl eframe::App for Desktop {
             let Some(win) = self.windows.get_mut(&id) else {
                 continue;
             };
-            let builder = box_builder(win).with_visible(visible);
+            let builder = box_builder(win, b.frozen).with_visible(visible);
             let viewport = win.viewport;
             let sections = std::mem::take(&mut win.sections);
             let view = BoxView {
@@ -1666,6 +1693,7 @@ impl eframe::App for Desktop {
                 drop_target: drop_target == Some(id)
                     && self.drag.as_ref().is_some_and(|d| d.from != id),
                 single_click,
+                glass: win.glass.active,
             };
             let icons = &mut self.icons;
             let box_ui = &mut win.ui;
@@ -1697,6 +1725,11 @@ impl eframe::App for Desktop {
                 if win.placed && win.raised {
                     tidy_platform::current().raise_desktop_surface(&win.title, true);
                 }
+                ctx.request_repaint();
+            }
+            let glass_before = win.glass.active;
+            extras::sync_glass(win, &look, visible);
+            if win.glass.active != glass_before {
                 ctx.request_repaint();
             }
             self.track_window(id, outer, res.shift);
@@ -1833,6 +1866,7 @@ mod tests {
             sections: Vec::new(),
             sections_key: (0, 0),
             grid: None,
+            glass: extras::GlassState::default(),
         };
         assert_eq!(
             win.shown(&[]),

@@ -318,6 +318,10 @@ pub struct ItemsView<'a> {
     pub portal: bool,
     /// Grille libre : cases notées ([`free_grid`]).
     pub free: Option<&'a BTreeMap<ItemRef, Cell>>,
+    /// Recherche dans la barre de titre : texte replié ([`super::search::fold`]). Seuls
+    /// les éléments qui correspondent sont affichés ; en grille libre, ils gardent
+    /// leur case.
+    pub filter: Option<&'a str>,
 }
 
 /// Résultat du dessin.
@@ -339,10 +343,21 @@ pub fn show(
     icons: &mut IconCache,
     out: &mut Vec<Action>,
 ) -> ItemsOutput {
-    let order: Vec<String> = v
-        .sections
+    // Recherche : sections réduites aux correspondances, sauf en grille libre où chaque
+    // élément garde sa case (les autres sont seulement cachés, voir `grid`).
+    let filtered;
+    let sections = match v.filter {
+        Some(query) if v.free.is_none() => {
+            filtered = super::search::filter_sections(v.sections, query);
+            filtered.as_slice()
+        }
+        _ => v.sections,
+    };
+    let order: Vec<String> = sections
         .iter()
-        .flat_map(|s| s.items.iter().map(|i| i.name.clone()))
+        .flat_map(|s| s.items.iter())
+        .filter(|i| v.filter.is_none_or(|q| super::search::matches(&i.name, q)))
+        .map(|i| i.name.clone())
         .collect();
     st.selected.retain(|n| order.contains(n));
     let mut result = ItemsOutput::default();
@@ -351,7 +366,7 @@ pub fn show(
         .auto_shrink(false)
         .show(ui, |ui| {
             let width = ui.available_width();
-            for section in v.sections {
+            for section in sections {
                 if let Some(g) = section.group {
                     section_title(ui, tidy_ui::i18n::tr(g.key()), width);
                 }
@@ -427,6 +442,13 @@ fn grid(
         columns: m.columns,
     };
     for (info, at) in section.items.iter().zip(&cells) {
+        // Recherche en grille libre : l'élément garde sa case, caché s'il ne correspond
+        // pas.
+        if v.filter
+            .is_some_and(|q| !super::search::matches(&info.name, q))
+        {
+            continue;
+        }
         let cell = Rect::from_min_size(
             area.min + vec2(at.col as f32 * m.cell.x, at.row as f32 * m.cell.y),
             m.cell,
