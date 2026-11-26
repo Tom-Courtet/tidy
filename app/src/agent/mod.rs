@@ -55,8 +55,8 @@ enum UserEvent {
 
 /// Lance l'agent ; rend la main quand on le quitte. `open_manager` : ouvrir aussi la
 /// fenêtre principale (lancement à la main, pas à l'ouverture de session).
-pub fn run(store: Store, open_manager: bool) -> Result<()> {
-    let listener = ipc::bind(&store)?;
+pub fn run(store: Store, lock: ipc::InstanceLock, open_manager: bool) -> Result<()> {
+    let (listener, auth) = ipc::bind(&store, &lock)?;
     let _socket_guard = SocketGuard(store.socket_path());
     let settings: Settings = store.load();
     crate::lang::apply(settings.language);
@@ -140,7 +140,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
             })
         }
     };
-    ipc::serve(listener, bus.clone(), handler)?;
+    ipc::serve(listener, auth, bus.clone(), handler)?;
 
     let mut app = App {
         store,
@@ -159,6 +159,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
         .run_app(&mut app)
         .context("boucle d'événements")?;
     log::info!("agent arrêté");
+    drop(lock);
     Ok(())
 }
 

@@ -41,6 +41,8 @@ uuid.workspace = true
 tidy-vault.workspace = true
 # Fonds d'écran (lot J) : bibliothèque, playlist, lecteur vidéo.
 tidy-wallpaper.workspace = true
+# Jeton du dialogue entre processus (Windows) : 32 octets aléatoires du système.
+getrandom = "0.4"
 
 [dev-dependencies]
 tempfile.workspace = true

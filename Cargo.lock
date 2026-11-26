@@ -2841,6 +2841,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "egui",
+ "getrandom",
  "global-hotkey",
  "jiff",
  "log",
