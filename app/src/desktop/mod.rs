@@ -685,7 +685,8 @@ impl Desktop {
                     self.create_box(at);
                 }
                 Event::SettingsChanged => {
-                    self.settings = self.store.load();
+                    // Lecture impossible : réglages en cours gardés.
+                    self.store.reload(&mut self.settings);
                     crate::lang::apply(self.settings.language);
                     self.widgets.settings_changed(&self.settings);
                 }

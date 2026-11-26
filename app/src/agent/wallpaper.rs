@@ -235,8 +235,9 @@ impl Controller {
         loop {
             match rx.recv_timeout(TICK) {
                 Ok(Msg::Reload) => {
-                    self.library = self.store.load();
-                    self.apply();
+                    if self.store.reload(&mut self.library) {
+                        self.apply();
+                    }
                 }
                 Ok(Msg::Next) => {
                     let now = Instant::now();
@@ -296,7 +297,13 @@ impl Controller {
     }
 
     fn reload_settings(&mut self) {
-        let new = self.store.load::<Settings>().wallpaper;
+        // Lecture impossible : réglages en cours gardés (pas de fonds désactivés par
+        // erreur, ce qui rendrait le fond d'origine).
+        let Ok(settings) = self.store.load_checked::<Settings>() else {
+            log::warn!("réglages des fonds non relus : réglages en cours gardés");
+            return;
+        };
+        let new = settings.wallpaper;
         if new == self.settings {
             return;
         }

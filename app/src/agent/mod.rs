@@ -303,7 +303,13 @@ impl App {
     }
 
     fn reload_settings(&mut self) {
-        let old = std::mem::replace(&mut self.settings, self.store.load());
+        // Lecture impossible (fichier verrouillé un instant) : réglages en cours gardés,
+        // plutôt que des valeurs par défaut (mode du bureau, raccourcis…).
+        let mut new = self.settings.clone();
+        if !self.store.reload(&mut new) {
+            return;
+        }
+        let old = std::mem::replace(&mut self.settings, new);
         crate::lang::apply(self.settings.language);
         if old.hotkeys != self.settings.hotkeys {
             self.register_hotkeys();

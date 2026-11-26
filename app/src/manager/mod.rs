@@ -315,7 +315,7 @@ impl Manager {
         self.sent_at = Some(Instant::now());
         let ok = self.request(Request::Desktop { command });
         if !ok {
-            self.desktop = self.store.load();
+            self.store.reload(&mut self.desktop);
         }
         ok
     }
@@ -358,7 +358,7 @@ impl Manager {
         if busy || (!force && self.desktop_read_at.elapsed() < DESKTOP_EVERY) {
             return;
         }
-        self.desktop = self.store.load();
+        self.store.reload(&mut self.desktop);
         self.desktop_read_at = Instant::now();
         if matches!(self.page, Page::Boxes | Page::Organization | Page::Widgets) {
             ctx.request_repaint_after(DESKTOP_EVERY);

@@ -199,8 +199,10 @@ fn try_apply_rules(
         return Err(t!("organize.no_desktop").to_owned());
     }
     let entries = scan_desktop(desktop).map_err(|e| t!("organize.scan_failed", error = e))?;
-    let state: DesktopState = store.load();
-    let mut settings: Settings = store.load();
+    // Lectures strictes : un état ou des réglages illisibles un instant ne doivent pas
+    // devenir un bureau vide (démarrage rapide, réglages réécrits).
+    let state: DesktopState = store.load_checked().map_err(|e| format!("{e:#}"))?;
+    let mut settings: Settings = store.load_checked().map_err(|e| format!("{e:#}"))?;
     let scope = if all { Scope::All } else { Scope::Unassigned };
     let plan = organize::plan(
         &state,

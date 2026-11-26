@@ -160,6 +160,22 @@ impl Store {
         })
     }
 
+    /// Relit `T` après un changement (réglages, état…) dans `current`. Une erreur de
+    /// lecture (fichier verrouillé un instant) garde `current` au lieu de le remplacer
+    /// par les valeurs par défaut. `true` : relu.
+    pub fn reload<T: Versioned>(&self, current: &mut T) -> bool {
+        match self.load_checked() {
+            Ok(value) => {
+                *current = value;
+                true
+            }
+            Err(e) => {
+                log::warn!("{e:#} : valeurs précédentes gardées");
+                false
+            }
+        }
+    }
+
     /// Lit `T` sans jamais rien mettre de côté : absent, valeurs par défaut ; erreur de
     /// lecture (fichier verrouillé un instant…) ou contenu illisible, `Err`. Pour les
     /// fichiers qu'il serait dangereux de remplacer par des valeurs par défaut (journal
@@ -254,6 +270,26 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use crate::settings::{DesktopMode, Settings};
+
+    /// Relecture impossible (ici : un dossier à la place du fichier) : les valeurs en
+    /// cours sont gardées, pas remplacées par les valeurs par défaut.
+    #[test]
+    fn reload_keeps_current_values_on_read_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let s = Settings {
+            desktop_mode: DesktopMode::Off,
+            ..Settings::default()
+        };
+        store.save(&s).unwrap();
+        let mut current = Settings::default();
+        assert!(store.reload(&mut current));
+        assert_eq!(current, s);
+        std::fs::remove_file(store.path_of::<Settings>()).unwrap();
+        std::fs::create_dir(store.path_of::<Settings>()).unwrap();
+        assert!(!store.reload(&mut current));
+        assert_eq!(current.desktop_mode, DesktopMode::Off);
+    }
 
     #[test]
     fn missing_file_gives_defaults_and_save_round_trips() {

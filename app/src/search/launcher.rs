@@ -148,7 +148,7 @@ impl Launcher {
         self.text = query.unwrap_or_default().to_owned();
         self.tab = Tab::All;
         self.reset_results();
-        self.recents = self.store.load();
+        self.store.reload(&mut self.recents);
         self.recents_version += 1;
         let platform = tidy_platform::current();
         let pos = super::placement(&platform.screens(), platform.mouse_location(), SIZE);
@@ -218,7 +218,7 @@ impl Launcher {
                     }
                     "reindex" => self.engine.rebuild(),
                     "recents_cleared" => {
-                        self.recents = self.store.load();
+                        self.store.reload(&mut self.recents);
                         self.recents_version += 1;
                     }
                     _ => {}
@@ -230,7 +230,7 @@ impl Launcher {
     }
 
     fn reload_settings(&mut self) {
-        self.settings = self.store.load();
+        self.store.reload(&mut self.settings);
         crate::lang::apply(self.settings.language);
         let config = Config::from_settings(&self.settings.search);
         if config != self.config {
@@ -398,7 +398,11 @@ impl Launcher {
     }
 
     fn remember(&mut self, path: &Path) {
-        self.recents = self.store.load();
+        // Relue avant d'être réécrite : une lecture impossible ne doit pas remplacer
+        // la liste par une liste vide.
+        if !self.store.reload(&mut self.recents) {
+            return;
+        }
         self.recents.touch(path, tidy_search::now());
         self.recents_version += 1;
         self.save_recents();
