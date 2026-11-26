@@ -1,6 +1,7 @@
 # ADR 006 · Boîte privée : image APFS chiffrée et enveloppe de clés
 
-Statut : Acceptée (24/11/2026)
+Statut : Remplacée par l'ADR 013 (26/11/2026) : un coffre chiffré fichier par fichier, le même sous Windows et macOS.
+Avant : acceptée (24/11/2026).
 
 ## Décision
 
