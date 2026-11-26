@@ -450,11 +450,11 @@ pub fn uninstall(store: &Store) -> UninstallReport {
             .push(format!("{} : {e:#}", t!("finish.step_wallpaper"))),
     }
 
-    // 3. Entrées du système.
-    report.check(
-        t!("finish.step_desktop_menu"),
-        platform.set_desktop_menu(None),
-    );
+    // 3. Entrées du système (le menu du bureau n'existe que sous Windows).
+    let menu = platform.set_desktop_menu(None);
+    if cfg!(windows) || menu.is_err() {
+        report.check(t!("finish.step_desktop_menu"), menu);
+    }
     if matches!(
         platform.login_item(),
         LoginState::On | LoginState::NeedsApproval
