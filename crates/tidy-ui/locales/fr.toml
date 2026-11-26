@@ -691,6 +691,7 @@ err_verify = "La vérification a échoué : rien n'a été chiffré, l'original 
 err_corrupt = "Le coffre est illisible ou a été modifié. Aucun fichier n'a été touché."
 err_symlink = "Les liens symboliques ne peuvent pas entrer dans la boîte privée : l'original reste en place."
 err_still_open = "Des fichiers de la boîte privée sont encore ouverts dans une appli : ferme-les puis recommence."
+err_in_use = "« {name} » a été ouvert depuis la boîte privée : ferme-le, verrouille la boîte, puis recommence (renommer ou mettre à la corbeille)."
 err_worker = "Le coffre ne répond pas : relance Tidy."
 err_no_desktop = "Bureau introuvable : rien n'a été fait."
 err_io = "Erreur du coffre : {detail}"

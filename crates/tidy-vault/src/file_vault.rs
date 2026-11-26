@@ -1025,8 +1025,10 @@ impl VaultBackend for FileVault {
 
     fn trash(&mut self, name: &str, dispose: Dispose) -> Result<()> {
         let key = self.key()?;
+        // Ouvert dans une appli : sa copie en clair est suivie jusqu'au verrouillage ;
+        // la mettre à la corbeille maintenant perdrait les modifications à venir.
         if self.opened.contains_key(name) {
-            self.sync_item(name)?;
+            return Err(VaultError::InUse(name.to_owned()));
         }
         let entries = self.item_entries(name)?;
         let token = crypto::hex(&crypto::random::<6>()?);
@@ -1058,6 +1060,11 @@ impl VaultBackend for FileVault {
         if new == old {
             return Ok(new.to_owned());
         }
+        // Ouvert dans une appli : la copie en clair garde l'ancien nom jusqu'au
+        // verrouillage ; on ne renomme qu'ensuite.
+        if self.opened.contains_key(old) {
+            return Err(VaultError::InUse(old.to_owned()));
+        }
         if new.to_lowercase() != old.to_lowercase() && self.top_taken(new) {
             return Err(VaultError::NameTaken(new.to_owned()));
         }
@@ -1067,9 +1074,6 @@ impl VaultBackend for FileVault {
         }
         self.write_index(&key, &index)?;
         self.index = index;
-        if let Some(o) = self.opened.remove(old) {
-            self.opened.insert(new.to_owned(), o);
-        }
         Ok(new.to_owned())
     }
 

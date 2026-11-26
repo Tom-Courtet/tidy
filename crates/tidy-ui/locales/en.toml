@@ -689,6 +689,7 @@ err_verify = "Verification failed: nothing was encrypted, the original stays in 
 err_corrupt = "The vault is unreadable or was modified. No file was touched."
 err_symlink = "Symbolic links cannot go into the private box: the original stays in place."
 err_still_open = "Files from the private box are still open in an app: close them and try again."
+err_in_use = "“{name}” was opened from the private box: close it, lock the box, then try again (rename or move to the Trash)."
 err_worker = "The vault is not responding: restart Tidy."
 err_no_desktop = "Desktop not found: nothing was done."
 err_io = "Vault error: {detail}"

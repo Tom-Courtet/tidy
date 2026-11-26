@@ -107,6 +107,9 @@ pub enum VaultError {
     StillOpen,
     /// L'original n'a pas pu aller à la corbeille : rien n'a changé.
     Disposal(String),
+    /// L'élément a été ouvert depuis le coffre (copie en clair suivie jusqu'au
+    /// verrouillage) : ni renommage ni corbeille avant d'avoir verrouillé.
+    InUse(String),
     Random(String),
     Io {
         context: &'static str,
@@ -143,6 +146,7 @@ impl fmt::Display for VaultError {
             Self::Symlink => f.write_str("les liens symboliques ne sont pas pris en charge"),
             Self::StillOpen => f.write_str("des fichiers du coffre sont encore ouverts"),
             Self::Disposal(e) => write!(f, "corbeille impossible : {e}"),
+            Self::InUse(name) => write!(f, "« {name} » est ouvert depuis le coffre"),
             Self::Random(e) => write!(f, "aléa du système indisponible : {e}"),
             Self::Io { context, error } => write!(f, "{context} : {error}"),
         }
