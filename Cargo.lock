@@ -2389,6 +2389,7 @@ dependencies = [
  "tempfile",
  "tidy-core",
  "tidy-platform",
+ "tidy-search",
  "tidy-ui",
  "tidy-widgets",
  "tracing",

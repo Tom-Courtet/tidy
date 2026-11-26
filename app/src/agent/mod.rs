@@ -12,6 +12,7 @@
 mod hotkeys;
 pub mod modules;
 pub mod organizer;
+pub mod search;
 mod supervisor;
 mod tray;
 mod watcher;
@@ -400,7 +401,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Hotkey(action, down) => match action {
                 Action::ToggleDesktop if down => self.toggle_desktop(),
                 Action::MainWindow if down => self.open_manager(None),
-                Action::Search if down => self.bus.publish(Event::OpenSearch),
+                Action::Search if down => search::open(&self.bus, None),
                 Action::QuickAccess => match self.settings.hotkeys.quick_access_mode {
                     QuickAccessMode::Hold => {
                         self.quick_access = down;
