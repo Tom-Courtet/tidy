@@ -32,8 +32,10 @@ use egui::{
 };
 use serde_json::Value;
 use tidy_core::geometry::{Point, Rect};
+use tidy_core::layouts::resolve_placement;
 use tidy_core::model::WidgetInstance;
 use tidy_core::screen::Screen;
+use tidy_core::settings::ResolutionPolicy;
 use tidy_core::settings::widgets::WidgetSettings;
 use tidy_core::{DesktopCommand, DesktopState, Settings, Store};
 use tidy_platform::SurfaceLevel;
@@ -141,6 +143,8 @@ pub struct WidgetHost {
     unknown: HashSet<String>,
     /// Bureau masqué par le mode concentration d'un pomodoro (à rendre ensuite).
     focus_hidden: bool,
+    /// Réglage du changement de résolution (`LayoutSettings::on_resolution_change`).
+    policy: ResolutionPolicy,
 }
 
 /// Modifications d'instances de l'image en cours (une commande par instance).
@@ -168,6 +172,7 @@ impl WidgetHost {
         Self {
             store: store.clone(),
             data_dir: store.root().to_path_buf(),
+            policy: settings.layout.on_resolution_change,
             settings: settings.widgets,
             windows: HashMap::new(),
             screens: Vec::new(),
@@ -179,6 +184,17 @@ impl WidgetHost {
     /// Les réglages ont changé (`Event::SettingsChanged`).
     pub fn settings_changed(&mut self, settings: &Settings) {
         self.settings = settings.widgets.clone();
+        self.policy = settings.layout.on_resolution_change;
+    }
+
+    /// Instantané ou disposition restaurés : chaque widget reprend la place enregistrée
+    /// (même avec « ne rien faire » au changement de résolution).
+    pub fn restored(&mut self, ctx: &egui::Context, state: &DesktopState) {
+        let policy = match self.policy {
+            ResolutionPolicy::Nothing => ResolutionPolicy::RememberPerResolution,
+            policy => policy,
+        };
+        self.place_all(ctx, state, policy);
     }
 
     /// Dessine une fenêtre par widget de `state` (créée au premier passage, oubliée
@@ -297,14 +313,29 @@ impl WidgetHost {
         true
     }
 
-    /// Écrans changés : chaque widget reprend la place mémorisée pour la nouvelle
-    /// configuration.
+    /// Écrans changés : chaque widget reprend sa place selon le réglage du changement
+    /// de résolution, comme les boîtes.
     fn screens_changed(&mut self, ctx: &egui::Context, state: &DesktopState) {
+        self.place_all(ctx, state, self.policy);
+    }
+
+    fn place_all(&mut self, ctx: &egui::Context, state: &DesktopState, policy: ResolutionPolicy) {
+        if self.screens.is_empty() {
+            return;
+        }
         for inst in &state.widgets {
             let Some(win) = self.windows.get_mut(&inst.id) else {
                 continue;
             };
-            let rect = match inst.placement.resolve(&self.screens) {
+            if policy == ResolutionPolicy::Nothing
+                && self
+                    .screens
+                    .iter()
+                    .any(|s| s.frame.contains(center(win.current)))
+            {
+                continue;
+            }
+            let rect = match resolve_placement(&inst.placement, &self.screens, policy) {
                 Some((_, r)) => r,
                 None => win
                     .current

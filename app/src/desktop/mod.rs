@@ -665,6 +665,7 @@ impl Desktop {
                         // Instantané ou disposition restaurés : chaque boîte reprend
                         // la place enregistrée.
                         self.place_windows(true);
+                        self.widgets.restored(&self.ctx, &self.state);
                     }
                     self.save(true);
                 }

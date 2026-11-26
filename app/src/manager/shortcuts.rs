@@ -115,16 +115,28 @@ pub fn row(m: &mut Manager, ui: &mut egui::Ui, slot: Slot) {
 /// Champ de saisie seul, avec la détection des conflits.
 pub fn field(m: &Manager, ui: &mut egui::Ui, slot: Slot) -> Option<FieldChange> {
     let value = get(&m.settings, &m.desktop, slot);
-    let (settings, desktop) = (&m.settings, &m.desktop);
-    hotkey::field(
-        ui,
-        slot_salt(slot),
-        value.as_deref(),
-        |text| match conflict(settings, desktop, slot, text) {
-            Some(owner) => Err(t!("hotkey.conflict", owner = owner.label(desktop))),
+    let (settings, desktop, store) = (&m.settings, &m.desktop, &m.store);
+    hotkey::field(ui, slot_salt(slot), value.as_deref(), |text| {
+        if let Some(owner) = conflict(settings, desktop, slot, text) {
+            return Err(t!("hotkey.conflict", owner = owner.label(desktop)));
+        }
+        // Raccourcis des dispositions nommées (page Dispositions), lus seulement quand
+        // un raccourci est saisi.
+        let index = tidy_core::layouts::peek_index(store);
+        match hotkey::conflict(
+            text,
+            index
+                .layouts
+                .iter()
+                .map(|l| (l.name.as_str(), l.hotkey.as_deref())),
+        ) {
+            Some(name) => Err(t!(
+                "hotkey.conflict",
+                owner = t!("layouts.hotkey_owner", name = name)
+            )),
             None => Ok(()),
-        },
-    )
+        }
+    })
 }
 
 fn slot_salt(slot: Slot) -> String {
