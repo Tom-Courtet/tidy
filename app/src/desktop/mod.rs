@@ -76,7 +76,6 @@ const HOTKEY_RAISE: Duration = Duration::from_secs(4);
 const EXPECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub fn run(store: Store) -> Result<()> {
-    let state = load_state(&store)?;
     let settings: Settings = store.load();
     crate::lang::apply(settings.language);
     let screens = tidy_platform::current().screens();
@@ -113,6 +112,8 @@ pub fn run(store: Store) -> Result<()> {
             false
         }
     };
+    // Après l'abonnement : une commande envoyée entre-temps attend dans `events`.
+    let state = load_state(&store)?;
 
     let host = host_rect(&screens);
     let native = eframe::NativeOptions {
