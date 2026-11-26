@@ -352,6 +352,32 @@ fn rename_items() {
     assert_eq!(fs::read(out.join("f.txt")).unwrap(), b"f");
 }
 
+/// Un élément ouvert ne se renomme ni ne part à la corbeille avant le verrouillage.
+#[test]
+fn opened_items_cannot_be_renamed_or_trashed() {
+    let b = Bench::new();
+    let (mut v, _) = b.created();
+    let src = b.file("journal.txt", b"lundi");
+    v.add(&src, &mut b.dispose()).unwrap();
+    let opened = v.open("journal.txt").unwrap();
+    fs::write(&opened, b"lundi et mardi").unwrap();
+    assert!(matches!(
+        v.rename("journal.txt", "notes.txt"),
+        Err(VaultError::InUse(n)) if n == "journal.txt"
+    ));
+    assert!(matches!(
+        v.trash("journal.txt", &mut b.dispose()),
+        Err(VaultError::InUse(_))
+    ));
+    assert_eq!(Bench::names(&v), ["journal.txt"]);
+    // Verrouillé (modifications rechiffrées), puis déverrouillé : permis.
+    v.lock();
+    v.unlock(PW).unwrap();
+    v.rename("journal.txt", "notes.txt").unwrap();
+    let out = v.extract("notes.txt", &b.desktop).unwrap();
+    assert_eq!(fs::read(out).unwrap(), b"lundi et mardi");
+}
+
 #[test]
 fn opened_files_are_reencrypted_then_wiped() {
     let b = Bench::new();

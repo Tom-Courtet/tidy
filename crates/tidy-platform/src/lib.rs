@@ -23,6 +23,8 @@ use tidy_core::settings::wallpaper::{Fit, OriginalWallpaper};
 
 mod convert;
 pub mod finder;
+mod fsops;
+pub use fsops::rename_no_replace;
 pub mod install;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -149,6 +151,11 @@ pub trait DesktopPlatform: Send + Sync {
     fn watch_desktop_drag(&self, _on_rect: RectCallback) -> bool {
         false
     }
+
+    /// Cesse de surveiller les clics sur le bureau (double-clic, rectangle) : à appeler
+    /// avant une attente longue du thread principal (arrêt). Windows : le crochet souris
+    /// global est retiré (un crochet qui ne répond plus ralentit toute la souris).
+    fn stop_desktop_watch(&self) {}
 
     /// Accès rapide : passe la fenêtre `title` au-dessus des applis (`true`) ou la
     /// remet au niveau du bureau (`false`).

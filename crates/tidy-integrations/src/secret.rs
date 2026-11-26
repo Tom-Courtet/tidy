@@ -1,4 +1,4 @@
-//! Secrets (clé de l'API Claude) dans le gestionnaire d'identifiants du système :
+//! Secrets (clé de l'API Claude, adresses privées des agendas ICS) dans le gestionnaire d'identifiants du système :
 //! Gestionnaire d'identifiants de Windows, trousseau de macOS (crate `keyring`).
 //!
 //! Une clé ne s'écrit jamais dans `config.json`, dans les réglages d'un widget ni dans
@@ -53,6 +53,58 @@ impl Keyring {
     }
 }
 
+/// Entrée du gestionnaire d'identifiants dont le nom n'est connu qu'à l'exécution
+/// (adresse privée d'un agenda ICS : « Tidy » / « ics-<identifiant de l'agenda> »).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedKeyring {
+    pub service: &'static str,
+    pub account: String,
+}
+
+impl NamedKeyring {
+    /// Adresse ICS de l'agenda `id`.
+    pub fn ics_calendar(id: &str) -> Self {
+        Self {
+            service: "Tidy",
+            account: format!("ics-{id}"),
+        }
+    }
+
+    fn entry(&self) -> Result<keyring::Entry, SecretError> {
+        keyring::Entry::new(self.service, &self.account).map_err(unavailable)
+    }
+}
+
+impl SecretStore for NamedKeyring {
+    fn get(&self) -> Result<Option<String>, SecretError> {
+        get(self.entry()?)
+    }
+
+    fn set(&self, value: &str) -> Result<(), SecretError> {
+        self.entry()?.set_password(value).map_err(unavailable)
+    }
+
+    fn delete(&self) -> Result<(), SecretError> {
+        delete(self.entry()?)
+    }
+}
+
+fn get(entry: keyring::Entry) -> Result<Option<String>, SecretError> {
+    match entry.get_password() {
+        Ok(v) if v.trim().is_empty() => Ok(None),
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(unavailable(e)),
+    }
+}
+
+fn delete(entry: keyring::Entry) -> Result<(), SecretError> {
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(unavailable(e)),
+    }
+}
+
 /// Erreur de `keyring`, sans le secret (les erreurs de `keyring` n'en contiennent pas,
 /// sauf `BadEncoding`, réduite ici à son nom).
 fn unavailable(e: keyring::Error) -> SecretError {
@@ -65,12 +117,7 @@ fn unavailable(e: keyring::Error) -> SecretError {
 
 impl SecretStore for Keyring {
     fn get(&self) -> Result<Option<String>, SecretError> {
-        match self.entry()?.get_password() {
-            Ok(v) if v.trim().is_empty() => Ok(None),
-            Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(unavailable(e)),
-        }
+        get(self.entry()?)
     }
 
     fn set(&self, value: &str) -> Result<(), SecretError> {
@@ -78,10 +125,7 @@ impl SecretStore for Keyring {
     }
 
     fn delete(&self) -> Result<(), SecretError> {
-        match self.entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(unavailable(e)),
-        }
+        delete(self.entry()?)
     }
 }
 

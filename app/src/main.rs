@@ -114,7 +114,9 @@ fn main() -> Result<()> {
     let _log_guard = logging::init(&store, role_name(role));
     match role {
         Role::Agent { background } => {
-            if ipc::request(&store, &Request::Ping).is_ok() {
+            // Une seule instance : le verrou `agent.lock`. Sans lui, un autre agent
+            // tourne (même s'il ne répond pas encore).
+            let Some(lock) = ipc::lock_instance(&store)? else {
                 // Relancé (Finder, Launchpad) alors qu'il tourne : on montre la fenêtre
                 // principale, sauf au démarrage de session.
                 // Windows : un exécutable téléchargé, alors qu'une copie installée
@@ -133,8 +135,8 @@ fn main() -> Result<()> {
                 }
                 println!("Tidy tourne déjà (icône dans la barre des menus).");
                 return Ok(());
-            }
-            agent::run(store, !background)
+            };
+            agent::run(store, lock, !background)
         }
         Role::Desktop => desktop::run(store),
         Role::Search => search::run(store, std::env::args().nth(2)),
@@ -159,7 +161,12 @@ fn main() -> Result<()> {
             if stashed > 0 {
                 println!("{stashed} icône(s) rangée(s) remise(s) à leur place.");
             }
-            if finder || explorer || stashed > 0 {
+            // Icônes encore hors de l'écran sans entrée au journal (Windows).
+            let rescued = icons::rescue_offscreen(&store);
+            if rescued > 0 {
+                println!("{rescued} icône(s) hors de l'écran ramenée(s) sur le bureau.");
+            }
+            if finder || explorer || stashed > 0 || rescued > 0 {
                 println!("Icônes du bureau rétablies.");
             } else {
                 println!("Tidy n'avait pas masqué les icônes du bureau : rien à faire.");

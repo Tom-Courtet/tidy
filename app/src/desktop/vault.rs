@@ -247,6 +247,7 @@ fn error_kind(e: &VaultError) -> &'static str {
         VaultError::Symlink => "lien symbolique",
         VaultError::StillOpen => "fichiers encore ouverts",
         VaultError::Disposal(_) => "corbeille refusée",
+        VaultError::InUse(_) => "élément ouvert",
         VaultError::Random(_) => "aléa indisponible",
         VaultError::Io { context, .. } => context,
     }
@@ -269,6 +270,7 @@ fn error_text(e: &VaultError) -> String {
         VaultError::BadName(_) => t!("box.rename_invalid").into(),
         VaultError::Symlink => t!("vault.err_symlink").into(),
         VaultError::StillOpen => t!("vault.err_still_open").into(),
+        VaultError::InUse(name) => t!("vault.err_in_use", name = name),
         e => t!("vault.err_io", detail = e.to_string()),
     }
 }

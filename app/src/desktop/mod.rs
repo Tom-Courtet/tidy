@@ -89,8 +89,10 @@ pub fn run(store: Store) -> Result<()> {
     let with_agent = match ipc::subscribe(
         &store,
         move |event| {
-            if event == Event::Shutdown {
-                vault::lock_before_exit();
+            // Arrêt de l'agent, ou boîtes désactivées : la boîte privée est verrouillée
+            // avant de sortir (l'agent attend, puis tue le bureau s'il traîne).
+            if event == Event::Shutdown || is_quit_request(&event) {
+                before_exit();
                 std::process::exit(0);
             }
             let _ = tx.send(event);
@@ -100,7 +102,7 @@ pub fn run(store: Store) -> Result<()> {
         },
         move || {
             log::warn!("l'agent a disparu : le bureau rend les icônes et s'arrête");
-            vault::lock_before_exit();
+            before_exit();
             restore_system_icons(&end_store);
             std::process::exit(0);
         },
@@ -163,6 +165,18 @@ pub fn run(store: Store) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("bureau : {e}"))
 }
 
+/// Avant la fin du processus du bureau : notes en attente écrites, boîte privée
+/// verrouillée.
+fn before_exit() {
+    tidy_widgets::notes::flush_writes();
+    vault::lock_before_exit();
+}
+
+/// Demande d'arrêt du bureau par l'agent (boîtes désactivées).
+fn is_quit_request(event: &Event) -> bool {
+    matches!(event, Event::Module { module, action, .. } if module == "desktop" && action == "quit")
+}
+
 /// État du bureau au démarrage. Le bureau est le seul écrivain de `desktop.json` :
 /// partir d'un état vide parce que le fichier était verrouillé un instant (antivirus,
 /// synchronisation) effacerait toutes les boîtes au premier enregistrement. On réessaie,
@@ -214,7 +228,14 @@ struct Channels {
     /// Résultats de « Appliquer les règles ».
     replies: Receiver<String>,
     reply_tx: Sender<String>,
+    /// Mises à la corbeille finies (faites sur un autre fil : ce thread porte le
+    /// crochet souris du système).
+    trashed: Receiver<Trashed>,
+    trashed_tx: Sender<Trashed>,
 }
+
+/// Mise à la corbeille finie : boîte, noms, résultat.
+type Trashed = (BoxId, Vec<String>, Result<(), String>);
 
 impl Channels {
     /// Installe les rappels système. Sur le thread principal, boucle lancée.
@@ -245,6 +266,7 @@ impl Channels {
         let wake = ctx.clone();
         let hotkeys = hotkeys::BoxHotkeys::new(hot_tx, move || wake.request_repaint());
         let (reply_tx, replies) = mpsc::channel();
+        let (trashed_tx, trashed) = mpsc::channel();
         Self {
             drawn,
             hotkey,
@@ -252,6 +274,8 @@ impl Channels {
             hotkeys,
             replies,
             reply_tx,
+            trashed,
+            trashed_tx,
         }
     }
 }
@@ -668,7 +692,8 @@ impl Desktop {
                     self.create_box(at);
                 }
                 Event::SettingsChanged => {
-                    self.settings = self.store.load();
+                    // Lecture impossible : réglages en cours gardés.
+                    self.store.reload(&mut self.settings);
                     crate::lang::apply(self.settings.language);
                     self.widgets.settings_changed(&self.settings);
                 }
@@ -726,6 +751,23 @@ impl Desktop {
         }
         if screens_changed {
             self.screens_changed(tidy_platform::current().screens());
+            changed = true;
+        }
+        // Mises à la corbeille finies.
+        while let Ok((b, names, result)) = self.channels.trashed.try_recv() {
+            match result {
+                Ok(()) => {
+                    if !self.is_portal(b) {
+                        ops::forget_items(&mut self.state, &names);
+                        self.save(true);
+                    }
+                    self.rescan_dir_of(b);
+                }
+                Err(e) => {
+                    log::warn!("corbeille : {e}");
+                    self.notice(b, t!("box.trash_failed"));
+                }
+            }
             changed = true;
         }
         // Rectangle tracé sur le bureau.
@@ -1139,19 +1181,17 @@ impl Desktop {
             Action::Trash { b, names } => {
                 let Some(dir) = self.dir_of(b) else { return };
                 let paths: Vec<PathBuf> = names.iter().map(|n| dir.join(n)).collect();
-                match platform.trash(&paths) {
-                    Ok(()) => {
-                        if !self.is_portal(b) {
-                            ops::forget_items(&mut self.state, &names);
-                            self.save(true);
-                        }
-                        self.rescan_dir_of(b);
-                    }
-                    Err(e) => {
-                        log::warn!("corbeille : {e:#}");
-                        self.notice(b, t!("box.trash_failed"));
-                    }
-                }
+                // Sur un autre fil : l'Explorateur peut prendre du temps, et ce thread
+                // porte le crochet souris du système (Windows).
+                let tx = self.channels.trashed_tx.clone();
+                let ctx = self.ctx.clone();
+                std::thread::spawn(move || {
+                    let result = tidy_platform::current()
+                        .trash(&paths)
+                        .map_err(|e| format!("{e:#}"));
+                    let _ = tx.send((b, names, result));
+                    ctx.request_repaint();
+                });
             }
             Action::CopyPath { b, names } => {
                 let Some(dir) = self.dir_of(b) else { return };
@@ -1422,7 +1462,8 @@ impl Desktop {
             }
         };
         let source = dir.join(old);
-        if let Err(e) = std::fs::rename(&source, &target) {
+        // Jamais d'écrasement : un élément apparu sous ce nom entre-temps reste intact.
+        if let Err(e) = tidy_platform::rename_no_replace(&source, &target) {
             log::warn!("renommer {} : {e}", source.display());
             self.notice(b, t!("box.rename_failed"));
             return;
@@ -1898,6 +1939,14 @@ impl eframe::App for Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// L'agent demande l'arrêt du bureau (boîtes désactivées) par un message que le
+    /// bureau reconnaît.
+    #[test]
+    fn the_agent_quit_request_is_recognised() {
+        assert!(is_quit_request(&crate::agent::desktop_quit_event()));
+        assert!(!is_quit_request(&Event::DesktopChanged));
+    }
 
     #[test]
     fn only_desktop_items_are_boxed() {

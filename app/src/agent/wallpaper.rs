@@ -7,10 +7,16 @@
 //!   par `Event::Module { module: "wallpaper", action: "video_state" }` ;
 //! - **playlist** : l'agent tient le fond courant et l'intervalle ;
 //! - **pause intelligente** : l'état du système est relevé toutes les
-//!   [`TICK`] ; en pause, la vidéo s'arrête et la playlist n'avance plus ;
+//!   [`TICK`], seulement quand une vidéo ou une playlist est active ; en pause, la
+//!   vidéo s'arrête et la playlist n'avance plus ;
+//! - **sobriété** : fonds désactivés, le fil dort jusqu'au prochain message ; fonds
+//!   fixes seulement, il ne se réveille que toutes les [`SCREENS_EVERY`] (écrans
+//!   changés, image du jour) ;
 //! - **fond d'origine** : relevé avant le premier changement
 //!   (`wallpaper-original.json`), rendu quand les fonds de Tidy sont désactivés, sur
-//!   demande, ou à la désinstallation ([`restore_original`]).
+//!   demande, ou à la désinstallation ([`restore_original`]). Tant que ce relevé n'est
+//!   pas enregistré, Tidy ne change rien (nouvel essai à chaque vérification) et la
+//!   page Fonds d'écran le dit.
 //!
 //! Demandes reçues (`Request::Module { module: "wallpaper", action }`, voir
 //! [`handle`]) : `reload` (bibliothèque modifiée), `next`, `restore_original`,
@@ -36,7 +42,8 @@ use super::supervisor::ChildProcess;
 use crate::ipc::Response;
 use crate::wallpaper::{VideoScreen, VideoState};
 
-/// Fréquence des vérifications (pause, playlist, processus du lecteur).
+/// Fréquence des vérifications avec une vidéo ou une playlist (pause, playlist,
+/// processus du lecteur).
 const TICK: Duration = Duration::from_secs(2);
 /// Relecture des écrans.
 const SCREENS_EVERY: Duration = Duration::from_secs(10);
@@ -175,6 +182,8 @@ struct Status {
     gave_up: bool,
     paused: Option<PauseReason>,
     original_saved: bool,
+    /// Le fond d'origine n'a pas pu être relevé : rien n'est appliqué.
+    original_missing: bool,
     /// Secondes avant le prochain fond de la playlist.
     next_in: Option<u64>,
     error: Option<String>,
@@ -197,6 +206,9 @@ struct Controller {
     desktop_hidden: bool,
     online_at: HashMap<String, Instant>,
     error: Option<String>,
+    /// Relevé du fond d'origine impossible : rien n'est appliqué, nouvel essai au
+    /// prochain tour.
+    original_missing: bool,
 }
 
 impl Controller {
@@ -219,16 +231,40 @@ impl Controller {
             desktop_hidden: false,
             online_at: HashMap::new(),
             error: None,
+            original_missing: false,
         }
+    }
+
+    /// Délai avant la prochaine vérification ; `None` : rien à surveiller, le fil
+    /// dort jusqu'au prochain message (réglages changés, demande de la page…).
+    fn next_tick(&self) -> Option<Duration> {
+        if !self.settings.enabled {
+            return None;
+        }
+        if self.animated() || self.original_missing || self.player.running() {
+            Some(TICK)
+        } else {
+            Some(SCREENS_EVERY)
+        }
+    }
+
+    /// Vidéo affichée ou playlist en cours : la pause intelligente compte.
+    fn animated(&self) -> bool {
+        !self.video.screens.is_empty() || self.settings.uses_playlist()
     }
 
     fn run(mut self, rx: Receiver<Msg>) {
         self.apply();
         loop {
-            match rx.recv_timeout(TICK) {
+            let received = match self.next_tick() {
+                Some(tick) => rx.recv_timeout(tick),
+                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match received {
                 Ok(Msg::Reload) => {
-                    self.library = self.store.load();
-                    self.apply();
+                    if self.store.reload(&mut self.library) {
+                        self.apply();
+                    }
                 }
                 Ok(Msg::Next) => {
                     let now = Instant::now();
@@ -272,6 +308,7 @@ impl Controller {
                 .paused
                 .filter(|_| !self.video.screens.is_empty() || self.settings.uses_playlist()),
             original_saved: self.store.path_of::<OriginalWallpaper>().exists(),
+            original_missing: self.original_missing,
             next_in: self
                 .settings
                 .uses_playlist()
@@ -287,7 +324,13 @@ impl Controller {
     }
 
     fn reload_settings(&mut self) {
-        let new = self.store.load::<Settings>().wallpaper;
+        // Lecture impossible : réglages en cours gardés (pas de fonds désactivés par
+        // erreur, ce qui rendrait le fond d'origine).
+        let Ok(settings) = self.store.load_checked::<Settings>() else {
+            log::warn!("réglages des fonds non relus : réglages en cours gardés");
+            return;
+        };
+        let new = settings.wallpaper;
         if new == self.settings {
             return;
         }
@@ -348,18 +391,23 @@ impl Controller {
             return;
         }
         let mut dirty = self.refresh_screens();
-        // Pause intelligente.
-        let activity = tidy_platform::current().system_activity();
-        let reason = pause::reason(
-            &self.settings.pause,
-            &Conditions {
-                fullscreen: activity.fullscreen,
-                on_battery: activity.on_battery,
-                battery_percent: activity.battery_percent,
-                locked: activity.locked,
-                desktop_hidden: self.desktop_hidden,
-            },
-        );
+        // Pause intelligente : l'état du système (fenêtres en plein écran, batterie)
+        // n'est relevé que s'il y a quelque chose à mettre en pause.
+        let reason = if self.animated() {
+            let activity = tidy_platform::current().system_activity();
+            pause::reason(
+                &self.settings.pause,
+                &Conditions {
+                    fullscreen: activity.fullscreen,
+                    on_battery: activity.on_battery,
+                    battery_percent: activity.battery_percent,
+                    locked: activity.locked,
+                    desktop_hidden: self.desktop_hidden,
+                },
+            )
+        } else {
+            None
+        };
         if reason != self.paused {
             log::info!(
                 "fonds d'écran : {}",
@@ -394,7 +442,8 @@ impl Controller {
             self.error = Some("le lecteur vidéo s'arrête sans cesse".into());
         }
         self.fetch_online();
-        if dirty {
+        // Fond d'origine pas encore relevé : nouvel essai.
+        if dirty || self.original_missing {
             self.apply();
         }
     }
@@ -490,26 +539,12 @@ impl Controller {
         }
     }
 
-    /// Note le fond d'origine avant le premier changement.
-    fn ensure_original(&self) {
-        let path = self.store.path_of::<OriginalWallpaper>();
-        if path.exists() {
-            return;
-        }
-        let Some(mut original) = tidy_platform::current().wallpaper_snapshot() else {
-            log::warn!("fond d'écran d'origine illisible : il ne pourra pas être rendu");
-            return;
-        };
-        if original.screens.is_empty() {
-            // Aucun écran vu (ouverture de session) : relevé au prochain changement.
-            log::warn!("fond d'écran d'origine : aucun écran relevé, nouvel essai plus tard");
-            return;
-        }
-        secure_original(self.store.root(), &mut original);
-        match self.store.save(&original) {
-            Ok(()) => log::info!("fond d'écran d'origine noté"),
-            Err(e) => log::error!("fond d'origine non enregistré : {e:#}"),
-        }
+    /// Note le fond d'origine avant le premier changement. `false` : pas de relevé
+    /// enregistré ; rien ne doit être appliqué (il ne pourrait pas être rendu).
+    fn ensure_original(&self) -> bool {
+        ensure_original_with(&self.store, || {
+            tidy_platform::current().wallpaper_snapshot()
+        })
     }
 
     /// Applique les réglages : fonds fixes et état du lecteur vidéo.
@@ -541,8 +576,15 @@ impl Controller {
         let changes = targets
             .iter()
             .any(|(key, _, t, _)| *t != Target::Nothing && self.applied.get(key) != Some(t));
-        if changes {
-            self.ensure_original();
+        let was_missing = self.original_missing;
+        self.original_missing = changes && !self.ensure_original();
+        if self.original_missing {
+            if !was_missing {
+                log::warn!(
+                    "fond d'écran d'origine non relevé : rien n'est appliqué pour l'instant"
+                );
+            }
+            return;
         }
         let mut videos = Vec::new();
         let mut error = None;
@@ -621,6 +663,38 @@ impl Controller {
     }
 }
 
+/// Note le fond d'origine (relevé par `snapshot`) s'il ne l'est pas encore. `true` :
+/// un relevé est enregistré.
+fn ensure_original_with(
+    store: &Store,
+    snapshot: impl FnOnce() -> Option<OriginalWallpaper>,
+) -> bool {
+    let path = store.path_of::<OriginalWallpaper>();
+    if path.exists() {
+        return true;
+    }
+    let Some(mut original) = snapshot() else {
+        log::warn!("fond d'écran d'origine illisible : nouvel essai plus tard");
+        return false;
+    };
+    if original.screens.is_empty() {
+        // Aucun écran vu (ouverture de session) : relevé au prochain essai.
+        log::warn!("fond d'écran d'origine : aucun écran relevé, nouvel essai plus tard");
+        return false;
+    }
+    secure_original(store.root(), &mut original);
+    match store.save(&original) {
+        Ok(()) => {
+            log::info!("fond d'écran d'origine noté");
+            true
+        }
+        Err(e) => {
+            log::error!("fond d'origine non enregistré : {e:#}");
+            false
+        }
+    }
+}
+
 /// Windows garde parfois le fond courant dans un fichier à lui
 /// (`…\Themes\TranscodedWallpaper`), qu'il réécrira au prochain changement : on en
 /// garde une copie, pour pouvoir le rendre.
@@ -691,6 +765,33 @@ mod tests {
         assert!(copy.is_file());
         assert!(transcoded.is_file(), "l'original du système reste");
         assert_eq!(original.screens[1].image.as_ref(), Some(&photo));
+    }
+
+    /// Sans relevé enregistré du fond d'origine, rien ne doit être appliqué.
+    #[test]
+    fn the_original_must_be_saved_before_any_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert!(!ensure_original_with(&store, || None));
+        assert!(!ensure_original_with(&store, || Some(
+            OriginalWallpaper::default()
+        )));
+        assert!(!store.path_of::<OriginalWallpaper>().exists());
+        let original = OriginalWallpaper {
+            screens: vec![OriginalScreen {
+                screen: "a".into(),
+                image: None,
+                fit: None,
+                background: Some([1, 2, 3]),
+            }],
+            ..Default::default()
+        };
+        assert!(ensure_original_with(&store, || Some(original.clone())));
+        assert!(store.path_of::<OriginalWallpaper>().exists());
+        // Déjà relevé : le système n'est plus consulté.
+        assert!(ensure_original_with(&store, || panic!(
+            "pas de nouveau relevé"
+        )));
     }
 
     #[test]

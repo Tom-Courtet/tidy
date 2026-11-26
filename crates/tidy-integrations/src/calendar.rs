@@ -90,13 +90,14 @@ impl IcsUrl {
     }
 }
 
-/// Adresse utilisable : `webcal://` → `https://`, espaces retirées, http(s) seulement.
+/// Adresse utilisable : `webcal://` → `https://`, espaces retirées, `https://` seulement
+/// (une adresse privée ne circule jamais en clair : `http://` est refusé).
 pub fn normalize_url(url: &str) -> Result<String, CalendarError> {
     let url = url.trim();
     let lower = url.to_ascii_lowercase();
     let url = if let Some(rest) = lower.strip_prefix("webcal://") {
         format!("https://{}", &url[url.len() - rest.len()..])
-    } else if lower.starts_with("https://") || lower.starts_with("http://") {
+    } else if lower.starts_with("https://") {
         url.to_owned()
     } else {
         return Err(CalendarError::BadUrl);
@@ -138,6 +139,10 @@ mod tests {
         );
         assert_eq!(
             normalize_url("file:///etc/passwd"),
+            Err(CalendarError::BadUrl)
+        );
+        assert_eq!(
+            normalize_url("http://calendar.example.com/x.ics"),
             Err(CalendarError::BadUrl)
         );
         assert_eq!(normalize_url(""), Err(CalendarError::BadUrl));

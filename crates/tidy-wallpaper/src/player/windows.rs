@@ -15,8 +15,8 @@ use windows::Win32::Foundation::{COLORREF, HWND, RECT, SIZE};
 use windows::Win32::Media::MediaFoundation::{
     IMFPMediaItem, IMFPMediaPlayer, IMFPMediaPlayerCallback, MF_VERSION, MFP_MEDIAPLAYER_STATE,
     MFP_MEDIAPLAYER_STATE_PAUSED, MFP_MEDIAPLAYER_STATE_PLAYING, MFP_MEDIAPLAYER_STATE_STOPPED,
-    MFP_OPTION_NONE, MFPCreateMediaPlayer, MFSTARTUP_FULL, MFStartup, MFVideoARMode_None,
-    MFVideoARMode_PreservePicture, MFVideoNormalizedRect,
+    MFP_OPTION_NONE, MFPCreateMediaPlayer, MFSTARTUP_FULL, MFShutdown, MFStartup,
+    MFVideoARMode_None, MFVideoARMode_PreservePicture, MFVideoNormalizedRect,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
@@ -32,6 +32,33 @@ pub struct Player {
     paused: bool,
     /// Réglages (son, ajustement) appliqués à la vidéo ouverte.
     configured: bool,
+    /// Dernier champ : Media Foundation n'est arrêté qu'après l'arrêt du lecteur
+    /// ([`Drop`] de `Player`) et la libération de son interface (champ `player`).
+    _mf: MediaFoundation,
+}
+
+/// Media Foundation démarré (`MFStartup`) : arrêté (`MFShutdown`, compté comme le
+/// démarrage) quand la valeur disparaît, y compris si la création du lecteur échoue.
+struct MediaFoundation;
+
+impl MediaFoundation {
+    fn start() -> Result<Self> {
+        // SAFETY: démarrage de Media Foundation sur ce thread ; chaque démarrage réussi
+        // est équilibré par l'arrêt de `Drop`.
+        unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) }
+            .context("Media Foundation indisponible")?;
+        Ok(Self)
+    }
+}
+
+impl Drop for MediaFoundation {
+    fn drop(&mut self) {
+        // SAFETY: équilibre le `MFStartup` réussi de `start` ; plus aucun objet Media
+        // Foundation de ce lecteur n'est vivant (voir l'ordre des champs de `Player`).
+        unsafe {
+            let _ = MFShutdown();
+        }
+    }
 }
 
 fn hwnd_of(window: &dyn HasWindowHandle) -> Option<HWND> {
@@ -44,12 +71,12 @@ fn hwnd_of(window: &dyn HasWindowHandle) -> Option<HWND> {
 impl Player {
     pub fn new(window: &dyn HasWindowHandle, path: &Path, options: VideoOptions) -> Result<Self> {
         let hwnd = hwnd_of(window).context("fenêtre native introuvable")?;
-        // SAFETY: initialisation de COM et de Media Foundation sur ce thread (celui de
-        // la fenêtre) ; des appels répétés sont comptés et sans danger.
+        // SAFETY: initialisation de COM sur ce thread (celui de la fenêtre) ; des
+        // appels répétés sont comptés et sans danger.
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            MFStartup(MF_VERSION, MFSTARTUP_FULL).context("Media Foundation indisponible")?;
         }
+        let mf = MediaFoundation::start()?;
         let mut player: Option<IMFPMediaPlayer> = None;
         // SAFETY: pas d'adresse (la vidéo est donnée ensuite), pas de rappel ; `hwnd`
         // est une fenêtre vivante de ce thread ; `player` reçoit l'interface créée.
@@ -80,6 +107,7 @@ impl Player {
             options,
             paused: false,
             configured: false,
+            _mf: mf,
         })
     }
 

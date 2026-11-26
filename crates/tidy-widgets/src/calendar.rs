@@ -4,6 +4,13 @@
 //!
 //! Les agendas se rechargent toutes les 15 minutes, sur un fil à part. Aucun appel
 //! réseau avant le premier affichage du widget posé sur le bureau.
+//!
+//! L'adresse ICS d'un agenda est secrète (chez Google, elle donne accès à son contenu) :
+//! elle est rangée dans le gestionnaire d'identifiants du système (« Tidy » /
+//! « ics-<identifiant de l'agenda> »), jamais dans les réglages du widget (donc ni dans
+//! `desktop.json`, ni dans les instantanés, ni sur le socket). Les réglages n'en gardent
+//! que l'hôte, pour l'affichage. Une adresse enregistrée en clair par une version
+//! précédente y est déplacée au premier chargement.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -17,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use tidy_integrations::calendar::{Agenda, CalendarError, CalendarProvider, IcsUrl, normalize_url};
 use tidy_integrations::ics::{Occurrence, When, day_start};
 use tidy_integrations::net::host_of;
+use tidy_integrations::secret::{NamedKeyring, SecretStore};
 use tidy_integrations::task::{Polled, Task};
 use tidy_ui::{icons, t, theme, widgets};
 
@@ -35,10 +43,18 @@ const REMINDERS: [u32; 7] = [0, 5, 10, 15, 30, 60, 1440];
 #[serde(default)]
 pub struct CalendarSource {
     pub name: String,
-    /// Adresse ICS (secrète chez Google : elle donne accès à l'agenda).
+    /// Ancienne adresse ICS en clair (versions précédentes) : lue pour être déplacée
+    /// dans le gestionnaire d'identifiants, puis retirée. Gardée seulement si ce
+    /// déplacement échoue (gestionnaire indisponible), pour ne pas perdre l'agenda.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub url: String,
     pub color: [u8; 3],
     pub enabled: bool,
+    /// Identifiant de l'agenda : son adresse est l'entrée « ics-<id> » du gestionnaire
+    /// d'identifiants.
+    pub id: String,
+    /// Hôte de l'adresse, seul affiché.
+    pub host: String,
 }
 
 impl Default for CalendarSource {
@@ -48,8 +64,15 @@ impl Default for CalendarSource {
             url: String::new(),
             color: rgb(theme::ACCENT_2),
             enabled: true,
+            id: String::new(),
+            host: String::new(),
         }
     }
+}
+
+/// Nouvel identifiant d'agenda.
+fn new_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 fn rgb(c: Color32) -> [u8; 3] {
@@ -75,6 +98,9 @@ pub struct CalendarSettings {
     pub agenda_days: u8,
     /// Rappel, en minutes avant le début (0 : aucun).
     pub reminder_minutes: u32,
+    /// Rappels déjà envoyés (`uid@début`), gardés pour ne pas les renvoyer après une
+    /// relance du bureau ; les plus anciens sont oubliés.
+    pub reminded: Vec<String>,
 }
 
 impl Default for CalendarSettings {
@@ -84,22 +110,42 @@ impl Default for CalendarSettings {
             view: View::Month,
             agenda_days: 7,
             reminder_minutes: 10,
+            reminded: Vec::new(),
         }
     }
 }
 
-type Load = Result<Box<dyn Agenda>, CalendarError>;
 /// Crée le fournisseur d'une adresse (remplacé dans les tests).
 type ProviderFactory =
     Arc<dyn Fn(&str) -> Result<Box<dyn CalendarProvider>, CalendarError> + Send + Sync>;
+/// Entrée du gestionnaire d'identifiants d'un agenda, par son identifiant (remplacée
+/// dans les tests).
+type SecretFactory = Arc<dyn Fn(&str) -> Box<dyn SecretStore> + Send + Sync>;
+
+/// Échec du chargement d'un agenda.
+#[derive(Debug, PartialEq)]
+enum LoadError {
+    Calendar(CalendarError),
+    /// Pas d'adresse dans le gestionnaire d'identifiants (entrée effacée à la main).
+    NoAddress,
+    /// Gestionnaire d'identifiants indisponible.
+    Keyring,
+}
+
+/// Résultat d'un chargement.
+struct Loaded {
+    agenda: Result<Box<dyn Agenda>, LoadError>,
+    /// L'ancienne adresse en clair est désormais dans le gestionnaire d'identifiants.
+    migrated: bool,
+}
 
 /// État d'un agenda chargé.
 #[derive(Default)]
 struct Slot {
     agenda: Option<Box<dyn Agenda>>,
-    error: Option<CalendarError>,
+    error: Option<LoadError>,
     tried: Option<Instant>,
-    task: Option<Task<Load>>,
+    task: Option<Task<Loaded>>,
 }
 
 impl Slot {
@@ -122,25 +168,42 @@ struct Item {
     occ: Occurrence,
 }
 
-/// Occurrences calculées pour une fenêtre, gardées tant que rien ne change.
+/// Occurrences calculées pour une fenêtre, gardées tant que rien ne change (partagées,
+/// pas recopiées à chaque image).
 struct Cache {
     from: Timestamp,
     to: Timestamp,
     version: u64,
-    items: Vec<Item>,
+    items: Arc<[Item]>,
 }
+
+/// Fenêtres de temps gardées en cache.
+#[derive(Clone, Copy)]
+enum Window {
+    /// Ce que montre la vue (grille du mois, agenda).
+    View,
+    /// Prochaines 25 heures (rappels).
+    Soon,
+    /// Jour choisi hors de la grille du mois affiché.
+    Day,
+}
+
+/// Rappels déjà envoyés gardés au plus (les plus anciens partent).
+const REMINDED_MAX: usize = 200;
 
 /// Formulaire d'ajout d'un agenda.
 #[derive(Default)]
 struct NewCalendar {
     name: String,
     url: String,
-    error: bool,
+    error: Option<String>,
 }
 
 pub struct CalendarWidget {
     s: CalendarSettings,
     factory: ProviderFactory,
+    secrets: SecretFactory,
+    /// Agendas chargés, par identifiant.
     slots: HashMap<String, Slot>,
     /// Change à chaque agenda chargé ou réglage modifié (invalide les caches).
     version: u64,
@@ -148,8 +211,8 @@ pub struct CalendarWidget {
     /// Mois affiché (premier jour) et jour choisi.
     month: Option<Date>,
     selected: Option<Date>,
-    view_cache: Option<Cache>,
-    soon_cache: Option<Cache>,
+    /// Une par [`Window`].
+    caches: [Option<Cache>; 3],
     /// Rappels déjà envoyés (`uid` + début).
     notified: HashSet<String>,
     new: NewCalendar,
@@ -159,25 +222,28 @@ pub struct CalendarWidget {
 pub fn create(settings: &serde_json::Value) -> Box<dyn Widget> {
     let factory: ProviderFactory =
         Arc::new(|url: &str| IcsUrl::new(url).map(|p| Box::new(p) as Box<dyn CalendarProvider>));
+    let secrets: SecretFactory =
+        Arc::new(|id: &str| Box::new(NamedKeyring::ics_calendar(id)) as Box<dyn SecretStore>);
     Box::new(CalendarWidget::new(
         serde_json::from_value(settings.clone()).unwrap_or_default(),
         factory,
+        secrets,
     ))
 }
 
 impl CalendarWidget {
-    fn new(s: CalendarSettings, factory: ProviderFactory) -> Self {
+    fn new(s: CalendarSettings, factory: ProviderFactory, secrets: SecretFactory) -> Self {
         Self {
+            notified: s.reminded.iter().cloned().collect(),
             s,
             factory,
+            secrets,
             slots: HashMap::new(),
             version: 0,
             tz: None,
             month: None,
             selected: None,
-            view_cache: None,
-            soon_cache: None,
-            notified: HashSet::new(),
+            caches: [None, None, None],
             new: NewCalendar::default(),
         }
     }
@@ -190,39 +256,82 @@ impl CalendarWidget {
         Timestamp::now().to_zoned_datetime(self.tz()).date()
     }
 
+    /// Retire l'agenda `i` : son adresse quitte aussi le gestionnaire d'identifiants.
+    fn remove_calendar(&mut self, i: usize) {
+        if i >= self.s.calendars.len() {
+            return;
+        }
+        let c = self.s.calendars.remove(i);
+        if !c.id.is_empty()
+            && let Err(e) = (self.secrets)(&c.id).delete()
+        {
+            log::warn!("agenda {} : adresse non effacée ({e})", c.host);
+        }
+    }
+
+    /// Identifiant et hôte des agendas qui n'en ont pas encore (versions précédentes).
+    fn complete_sources(&mut self, cx: &mut WidgetCx) {
+        for c in &mut self.s.calendars {
+            if c.id.is_empty() {
+                c.id = new_id();
+                cx.changed = true;
+            }
+            if c.host.is_empty() && !c.url.is_empty() {
+                c.host = host_of(&c.url).to_owned();
+                cx.changed = true;
+            }
+        }
+    }
+
     /// Relève les chargements finis et lance ceux qui sont dus.
-    fn pump(&mut self, ui: &Ui) {
+    fn pump(&mut self, ui: &Ui, cx: &mut WidgetCx) {
+        self.complete_sources(cx);
         let now = Instant::now();
-        let urls: Vec<String> = self
+        let ids: Vec<String> = self
             .s
             .calendars
             .iter()
             .filter(|c| c.enabled)
-            .map(|c| c.url.clone())
+            .map(|c| c.id.clone())
             .collect();
         let before = self.slots.len();
-        self.slots.retain(|k, _| urls.contains(k));
+        self.slots.retain(|k, _| ids.contains(k));
         if self.slots.len() != before {
             self.version += 1;
         }
-        for url in urls {
-            let slot = self.slots.entry(url.clone()).or_default();
+        for id in ids {
+            let slot = self.slots.entry(id.clone()).or_default();
             if let Some(task) = &slot.task {
                 match task.poll() {
                     Polled::Pending => continue,
-                    Polled::Done(Ok(agenda)) => {
-                        slot.agenda = Some(agenda);
-                        slot.error = None;
+                    Polled::Done(loaded) => {
+                        match loaded.agenda {
+                            Ok(agenda) => {
+                                slot.agenda = Some(agenda);
+                                slot.error = None;
+                            }
+                            Err(e) => slot.error = Some(e),
+                        }
+                        if loaded.migrated
+                            && let Some(c) = self.s.calendars.iter_mut().find(|c| c.id == id)
+                        {
+                            // Adresse rangée dans le gestionnaire d'identifiants : plus
+                            // jamais dans les réglages.
+                            c.url.clear();
+                            cx.changed = true;
+                        }
                     }
-                    Polled::Done(Err(e)) => slot.error = Some(e),
-                    Polled::Lost => slot.error = Some(CalendarError::NotACalendar),
+                    Polled::Lost => {
+                        slot.error = Some(LoadError::Calendar(CalendarError::NotACalendar))
+                    }
                 }
                 slot.task = None;
                 slot.tried = Some(now);
                 self.version += 1;
             }
             if slot.due(now) == Some(Duration::ZERO) {
-                spawn(slot, &self.factory, url, ui);
+                let legacy = legacy_url(&self.s.calendars, &id);
+                spawn(slot, &self.factory, &self.secrets, id, legacy, ui);
             }
         }
     }
@@ -234,7 +343,7 @@ impl CalendarWidget {
             if !c.enabled {
                 continue;
             }
-            if let Some(agenda) = self.slots.get(&c.url).and_then(|s| s.agenda.as_ref()) {
+            if let Some(agenda) = self.slots.get(&c.id).and_then(|s| s.agenda.as_ref()) {
                 items.extend(
                     agenda
                         .occurrences(from, to, tz)
@@ -254,45 +363,35 @@ impl CalendarWidget {
     }
 
     /// Occurrences d'une fenêtre, recalculées seulement si elle ou les données changent.
-    fn cached(&mut self, soon: bool, from: Timestamp, to: Timestamp) -> Vec<Item> {
+    fn cached(&mut self, window: Window, from: Timestamp, to: Timestamp) -> Arc<[Item]> {
         let tz = self.tz();
         let version = self.version;
-        let slot = if soon {
-            &self.soon_cache
-        } else {
-            &self.view_cache
-        };
-        if let Some(c) = slot
+        if let Some(c) = &self.caches[window as usize]
             && c.from == from
             && c.to == to
             && c.version == version
         {
-            return c.items.clone();
+            return Arc::clone(&c.items);
         }
-        let items = self.collect(from, to, &tz);
-        let cache = Some(Cache {
+        let items: Arc<[Item]> = self.collect(from, to, &tz).into();
+        self.caches[window as usize] = Some(Cache {
             from,
             to,
             version,
-            items: items.clone(),
+            items: Arc::clone(&items),
         });
-        if soon {
-            self.soon_cache = cache;
-        } else {
-            self.view_cache = cache;
-        }
         items
     }
 
     /// Occurrences des prochaines 25 heures (rappels), à la minute près.
-    fn soon(&mut self) -> Vec<Item> {
+    fn soon(&mut self) -> Arc<[Item]> {
         let now = Timestamp::now();
         let minute =
             Timestamp::from_second(now.as_second() - now.as_second().rem_euclid(60)).unwrap_or(now);
         let to = minute
             .checked_add(Duration::from_secs(25 * 3600))
             .unwrap_or(minute);
-        self.cached(true, minute, to)
+        self.cached(Window::Soon, minute, to)
     }
 
     fn color(&self, calendar: usize) -> Color32 {
@@ -309,6 +408,7 @@ impl CalendarWidget {
         let soon = self.soon();
         let now = Timestamp::now();
         let tz = self.tz();
+        let mut sent = false;
         for (key, item) in due_reminders(&soon, now, self.s.reminder_minutes, &self.notified, &tz) {
             let start = item
                 .occ
@@ -334,7 +434,14 @@ impl CalendarWidget {
                 },
                 body,
             });
-            self.notified.insert(key);
+            self.notified.insert(key.clone());
+            self.s.reminded.push(key);
+            sent = true;
+        }
+        if sent {
+            // Noté dans les réglages : pas de doublon après une relance du bureau.
+            prune_reminded(&mut self.s.reminded, now);
+            cx.changed = true;
         }
     }
 
@@ -381,7 +488,7 @@ impl CalendarWidget {
         let first = month.checked_sub(back.days()).unwrap_or(month);
         let last = first.checked_add(42.days()).unwrap_or(first);
         let tz = self.tz();
-        let items = self.cached(false, day_start(first, &tz), day_start(last, &tz));
+        let items = self.cached(Window::View, day_start(first, &tz), day_start(last, &tz));
 
         let cell = ((ui.available_width() - 6.0 * 2.0) / 7.0).clamp(24.0, 60.0);
         egui::Grid::new("mois")
@@ -427,15 +534,19 @@ impl CalendarWidget {
         widgets::row_separator(ui);
         let day_items: Vec<Item> = if (first..last).contains(&selected) {
             items
-                .into_iter()
+                .iter()
                 .filter(|it| it.occ.when.on_day(selected, &tz))
+                .cloned()
                 .collect()
         } else {
-            self.collect(
+            // Jour choisi dans un autre mois : en cache aussi, pas recalculé à chaque
+            // image.
+            self.cached(
+                Window::Day,
                 day_start(selected, &tz),
                 day_start(selected.tomorrow().unwrap_or(selected), &tz),
-                &tz,
             )
+            .to_vec()
         };
         ui.label(RichText::new(day_title(selected, today)).size(theme::SIZE_M));
         if day_items.is_empty() {
@@ -466,7 +577,7 @@ impl CalendarWidget {
         let now = Timestamp::now();
         let minute =
             Timestamp::from_second(now.as_second() - now.as_second().rem_euclid(60)).unwrap_or(now);
-        let items = self.cached(false, minute, day_start(end, &tz));
+        let items = self.cached(Window::View, minute, day_start(end, &tz));
         if items.is_empty() {
             ui.label(widgets::dim(t!("widgets2.cal_nothing_soon")));
             return;
@@ -495,11 +606,92 @@ impl CalendarWidget {
     }
 }
 
-fn spawn(slot: &mut Slot, factory: &ProviderFactory, url: String, ui: &Ui) {
+/// Ancienne adresse en clair de l'agenda `id`, à déplacer dans le gestionnaire
+/// d'identifiants.
+fn legacy_url(calendars: &[CalendarSource], id: &str) -> Option<String> {
+    calendars
+        .iter()
+        .find(|c| c.id == id && !c.url.is_empty())
+        .map(|c| c.url.clone())
+}
+
+/// Charge un agenda sur un fil à part : son adresse est lue dans le gestionnaire
+/// d'identifiants (ou y est d'abord rangée, si elle était encore en clair).
+fn spawn(
+    slot: &mut Slot,
+    factory: &ProviderFactory,
+    secrets: &SecretFactory,
+    id: String,
+    legacy: Option<String>,
+    ui: &Ui,
+) {
     let factory = factory.clone();
+    let secrets = secrets.clone();
     slot.task = Some(Task::spawn("agenda", online::waker(ui), move || {
-        factory(&url)?.load()
+        load(&factory, &secrets, &id, legacy)
     }));
+}
+
+fn load(
+    factory: &ProviderFactory,
+    secrets: &SecretFactory,
+    id: &str,
+    legacy: Option<String>,
+) -> Loaded {
+    let secret = secrets(id);
+    let (url, migrated) = match legacy {
+        Some(url) => match secret.set(&url) {
+            Ok(()) => {
+                log::info!(
+                    "agenda {} : adresse rangée dans le gestionnaire d'identifiants",
+                    host_of(&url)
+                );
+                (url, true)
+            }
+            Err(e) => {
+                log::warn!(
+                    "agenda {} : adresse gardée dans les réglages ({e})",
+                    host_of(&url)
+                );
+                (url, false)
+            }
+        },
+        None => match secret.get() {
+            Ok(Some(url)) => (url, false),
+            Ok(None) => {
+                return Loaded {
+                    agenda: Err(LoadError::NoAddress),
+                    migrated: false,
+                };
+            }
+            Err(e) => {
+                log::warn!("agenda : {e}");
+                return Loaded {
+                    agenda: Err(LoadError::Keyring),
+                    migrated: false,
+                };
+            }
+        },
+    };
+    Loaded {
+        agenda: factory(&url)
+            .and_then(|p| p.load())
+            .map_err(LoadError::Calendar),
+        migrated,
+    }
+}
+
+/// Oublie les rappels envoyés pour des débuts passés depuis plus d'un jour, et garde
+/// au plus [`REMINDED_MAX`] rappels.
+fn prune_reminded(reminded: &mut Vec<String>, now: Timestamp) {
+    let horizon = now.as_second() - 24 * 3600;
+    reminded.retain(|key| {
+        key.rsplit_once('@')
+            .and_then(|(_, start)| start.parse::<i64>().ok())
+            .is_some_and(|start| start >= horizon)
+    });
+    let excess = reminded.len().saturating_sub(REMINDED_MAX);
+    reminded.drain(..excess);
 }
 
 /// Rappels à envoyer maintenant : début dans moins de `minutes`, pas encore commencé,
@@ -633,7 +825,7 @@ fn event_row(ui: &mut Ui, it: &Item, color: Color32, tz: &TimeZone) {
 
 impl Widget for CalendarWidget {
     fn ui(&mut self, ui: &mut Ui, cx: &mut WidgetCx) {
-        self.pump(ui);
+        self.pump(ui, cx);
         self.remind(cx);
         if self.s.calendars.iter().all(|c| !c.enabled) {
             ui.vertical_centered(|ui| {
@@ -655,17 +847,21 @@ impl Widget for CalendarWidget {
         // Erreurs : une ligne par agenda en échec, données précédentes gardées.
         let mut retry = None;
         for c in self.s.calendars.iter().filter(|c| c.enabled) {
-            if let Some(e) = self.slots.get(&c.url).and_then(|s| s.error.as_ref()) {
-                let text = format!("{} : {}", calendar_name(c), calendar_error_text(e));
+            if let Some(e) = self.slots.get(&c.id).and_then(|s| s.error.as_ref()) {
+                let text = format!("{} : {}", calendar_name(c), load_error_text(e));
                 if error_notice(ui, &text, true) {
-                    retry = Some(c.url.clone());
+                    retry = Some(c.id.clone());
                 }
             }
         }
-        if let Some(url) = retry
-            && let Some(slot) = self.slots.get_mut(&url)
-        {
-            spawn(slot, &self.factory, url, ui);
+        if let Some(id) = retry {
+            let legacy = legacy_url(&self.s.calendars, &id);
+            // Un seul chargement à la fois : un clic de plus pendant l'essai ne relance rien.
+            if let Some(slot) = self.slots.get_mut(&id)
+                && slot.task.is_none()
+            {
+                spawn(slot, &self.factory, &self.secrets, id, legacy, ui);
+            }
         }
     }
 
@@ -693,15 +889,15 @@ impl Widget for CalendarWidget {
                     });
                 });
                 // L'adresse complète est secrète : seul l'hôte s'affiche.
-                ui.label(widgets::dim(host_of(&c.url)));
+                ui.label(widgets::dim(&c.host));
                 let mut color = Color32::from_rgb(c.color[0], c.color[1], c.color[2]);
                 if widgets::swatches(ui, &mut color) {
                     c.color = rgb(color);
                     changed = true;
                 }
-                if let Some(slot) = self.slots.get(&c.url) {
+                if let Some(slot) = self.slots.get(&c.id) {
                     if let Some(e) = &slot.error {
-                        ui.label(RichText::new(calendar_error_text(e)).color(theme::WARNING));
+                        ui.label(RichText::new(load_error_text(e)).color(theme::WARNING));
                     } else if slot.agenda.is_some() {
                         ui.label(widgets::dim(t!("widgets2.cal_loaded")));
                     }
@@ -709,7 +905,7 @@ impl Widget for CalendarWidget {
             });
         }
         if let Some(i) = remove {
-            self.s.calendars.remove(i);
+            self.remove_calendar(i);
             changed = true;
         }
 
@@ -727,30 +923,44 @@ impl Widget for CalendarWidget {
                 .password(true)
                 .desired_width(f32::INFINITY),
         );
-        if self.new.error {
-            ui.label(RichText::new(t!("widgets2.cal_url_bad")).color(theme::WARNING));
+        if let Some(error) = &self.new.error {
+            ui.label(RichText::new(error).color(theme::WARNING));
         }
         if widgets::primary(ui, t!("widgets2.cal_add_button")).clicked() {
             match normalize_url(&self.new.url) {
-                Ok(url) if !self.s.calendars.iter().any(|c| c.url == url) => {
-                    let n = self.s.calendars.len();
-                    let color = widgets::SWATCHES[5 + n % (widgets::SWATCHES.len() - 5)];
-                    let name = self.new.name.trim();
-                    self.s.calendars.push(CalendarSource {
-                        name: if name.is_empty() {
-                            host_of(&url).to_owned()
-                        } else {
-                            name.to_owned()
-                        },
-                        url,
-                        color: rgb(color),
-                        enabled: true,
-                    });
-                    self.new = NewCalendar::default();
-                    changed = true;
+                Ok(url) => {
+                    let id = new_id();
+                    // L'adresse va dans le gestionnaire d'identifiants, jamais dans les
+                    // réglages.
+                    match (self.secrets)(&id).set(&url) {
+                        Ok(()) => {
+                            let n = self.s.calendars.len();
+                            let color = widgets::SWATCHES[5 + n % (widgets::SWATCHES.len() - 5)];
+                            let name = self.new.name.trim();
+                            let host = host_of(&url).to_owned();
+                            self.s.calendars.push(CalendarSource {
+                                name: if name.is_empty() {
+                                    host.clone()
+                                } else {
+                                    name.to_owned()
+                                },
+                                color: rgb(color),
+                                enabled: true,
+                                id,
+                                host,
+                                ..Default::default()
+                            });
+                            self.new = NewCalendar::default();
+                            changed = true;
+                        }
+                        Err(e) => {
+                            log::warn!("agenda {} : {e}", host_of(&url));
+                            self.new.error =
+                                Some(t!("widgets2.cal_keyring_unavailable").to_owned());
+                        }
+                    }
                 }
-                Ok(_) => self.new = NewCalendar::default(),
-                Err(_) => self.new.error = true,
+                Err(_) => self.new.error = Some(t!("widgets2.cal_url_bad").to_owned()),
             }
         }
         widgets::hint(ui, t!("widgets2.cal_help_google"));
@@ -808,7 +1018,7 @@ impl Widget for CalendarWidget {
         let now = Instant::now();
         let mut next = self.slots.values().filter_map(|s| s.due(now)).min();
         if self.s.reminder_minutes > 0
-            && let (Some(cache), Some(tz)) = (&self.soon_cache, &self.tz)
+            && let (Some(cache), Some(tz)) = (&self.caches[Window::Soon as usize], &self.tz)
         {
             let r = next_reminder(&cache.items, Timestamp::now(), self.s.reminder_minutes, tz);
             next = match (next, r) {
@@ -827,9 +1037,17 @@ impl Widget for CalendarWidget {
 
 fn calendar_name(c: &CalendarSource) -> &str {
     if c.name.trim().is_empty() {
-        host_of(&c.url)
+        &c.host
     } else {
         &c.name
+    }
+}
+
+fn load_error_text(e: &LoadError) -> String {
+    match e {
+        LoadError::Calendar(e) => calendar_error_text(e),
+        LoadError::NoAddress => t!("widgets2.cal_address_missing").to_owned(),
+        LoadError::Keyring => t!("widgets2.cal_keyring_unavailable").to_owned(),
     }
 }
 
@@ -879,6 +1097,45 @@ mod tests {
         })
     }
 
+    /// Gestionnaire d'identifiants en mémoire, partagé par toutes les entrées.
+    #[derive(Clone, Default)]
+    struct Vault(Arc<std::sync::Mutex<HashMap<String, String>>>);
+
+    struct VaultEntry(Vault, String);
+
+    impl SecretStore for VaultEntry {
+        fn get(&self) -> Result<Option<String>, tidy_integrations::secret::SecretError> {
+            Ok(self.0.0.lock().unwrap().get(&self.1).cloned())
+        }
+        fn set(&self, value: &str) -> Result<(), tidy_integrations::secret::SecretError> {
+            self.0
+                .0
+                .lock()
+                .unwrap()
+                .insert(self.1.clone(), value.into());
+            Ok(())
+        }
+        fn delete(&self) -> Result<(), tidy_integrations::secret::SecretError> {
+            self.0.0.lock().unwrap().remove(&self.1);
+            Ok(())
+        }
+    }
+
+    impl Vault {
+        fn factory(&self) -> SecretFactory {
+            let vault = self.clone();
+            Arc::new(move |id: &str| {
+                Box::new(VaultEntry(vault.clone(), format!("ics-{id}"))) as Box<dyn SecretStore>
+            })
+        }
+    }
+
+    fn widget(s: CalendarSettings) -> (CalendarWidget, Vault) {
+        let vault = Vault::default();
+        (CalendarWidget::new(s, recorded(), vault.factory()), vault)
+    }
+
+    /// Réglages d'une version précédente : adresses en clair, sans identifiant.
     fn settings(urls: &[&str], view: View) -> CalendarSettings {
         CalendarSettings {
             calendars: urls
@@ -911,7 +1168,7 @@ mod tests {
                 &["https://google.test/a.ics", "https://outlook.test/b.ics"],
                 view,
             );
-            let mut w = CalendarWidget::new(s, recorded());
+            let (mut w, _) = widget(s);
             render(&mut w, 1);
             wait(&mut w);
             render(&mut w, 2);
@@ -925,20 +1182,20 @@ mod tests {
 
     #[test]
     fn a_page_that_is_not_a_calendar_is_reported() {
-        let mut w = CalendarWidget::new(
-            settings(&["https://broken.test/x"], View::Month),
-            recorded(),
-        );
+        let (mut w, _) = widget(settings(&["https://broken.test/x"], View::Month));
         render(&mut w, 1);
         wait(&mut w);
         render(&mut w, 1);
         let slot = w.slots.values().next().unwrap();
-        assert_eq!(slot.error, Some(CalendarError::NotACalendar));
+        assert_eq!(
+            slot.error,
+            Some(LoadError::Calendar(CalendarError::NotACalendar))
+        );
     }
 
     #[test]
     fn no_calendar_means_no_network_and_no_wake_up() {
-        let mut w = CalendarWidget::new(CalendarSettings::default(), recorded());
+        let (mut w, _) = widget(CalendarSettings::default());
         render(&mut w, 2);
         assert!(w.slots.is_empty());
         assert_eq!(w.repaint_after(), None);
@@ -984,6 +1241,56 @@ mod tests {
         );
     }
 
+    /// Rappels envoyés notés dans les réglages : pas de doublon après une relance ; les
+    /// anciens sont oubliés.
+    #[test]
+    fn sent_reminders_survive_a_restart() {
+        let now: Timestamp = "2026-11-26T10:00:00Z".parse().unwrap();
+        let start = "2026-11-26T10:08:00Z"
+            .parse::<Timestamp>()
+            .unwrap()
+            .as_second();
+        let s = CalendarSettings {
+            reminded: vec![format!("bientot@{start}")],
+            ..Default::default()
+        };
+        let (w, _) = widget(s);
+        let items = vec![timed("bientot", "2026-11-26T10:08:00Z", 30)];
+        assert!(due_reminders(&items, now, 10, &w.notified, &TimeZone::UTC).is_empty());
+
+        let old = now.as_second() - 3 * 24 * 3600;
+        let mut reminded = vec![
+            format!("vieux@{old}"),
+            format!("a@b@{start}"),
+            "abîmé".into(),
+        ];
+        prune_reminded(&mut reminded, now);
+        assert_eq!(reminded, [format!("a@b@{start}")]);
+        let mut many: Vec<String> = (0..REMINDED_MAX + 5)
+            .map(|k| format!("x{k}@{start}"))
+            .collect();
+        prune_reminded(&mut many, now);
+        assert_eq!(many.len(), REMINDED_MAX);
+        assert_eq!(many[0], "x5@".to_owned() + &start.to_string());
+    }
+
+    /// Une même fenêtre n'est pas recalculée (ni recopiée) d'une image à l'autre.
+    #[test]
+    fn occurrences_are_computed_once_per_window() {
+        let (mut w, _) = widget(settings(&["https://google.test/a.ics"], View::Month));
+        render(&mut w, 1);
+        wait(&mut w);
+        let (from, to) = (
+            "2026-11-01T00:00:00Z".parse().unwrap(),
+            "2026-12-01T00:00:00Z".parse().unwrap(),
+        );
+        let a = w.cached(Window::Day, from, to);
+        let b = w.cached(Window::Day, from, to);
+        assert!(Arc::ptr_eq(&a, &b));
+        w.version += 1;
+        assert!(!Arc::ptr_eq(&a, &w.cached(Window::Day, from, to)));
+    }
+
     #[test]
     fn day_titles() {
         let today = jiff::civil::date(2026, 11, 26);
@@ -996,9 +1303,79 @@ mod tests {
 
     #[test]
     fn settings_survive_a_round_trip() {
-        let s = settings(&["https://google.test/a.ics"], View::Agenda);
-        let w = CalendarWidget::new(s.clone(), recorded());
+        let mut s = settings(&[], View::Agenda);
+        s.calendars.push(CalendarSource {
+            name: "Travail".into(),
+            id: "abc".into(),
+            host: "google.test".into(),
+            ..Default::default()
+        });
+        let (w, _) = widget(s.clone());
         let again: CalendarSettings = serde_json::from_value(w.save()).unwrap();
         assert_eq!(again, s);
+    }
+
+    /// Adresses en clair d'une version précédente : rangées dans le gestionnaire
+    /// d'identifiants au premier chargement, puis absentes des réglages.
+    #[test]
+    fn plain_addresses_move_to_the_keyring() {
+        let url = "https://google.test/private-abc/basic.ics";
+        let mut s = settings(&[url], View::Agenda);
+        s.calendars[0].name = "Travail".into();
+        let (mut w, vault) = widget(s);
+        let mut changed = false;
+        for _ in 0..200 {
+            changed |= render(&mut w, 1).changed;
+            if w.s.calendars[0].url.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(changed, "réglages à enregistrer");
+        let c = &w.s.calendars[0];
+        assert!(c.url.is_empty());
+        assert_eq!(c.host, "google.test");
+        assert_eq!(
+            vault
+                .0
+                .lock()
+                .unwrap()
+                .get(&format!("ics-{}", c.id))
+                .map(String::as_str),
+            Some(url)
+        );
+        let saved = w.save().to_string();
+        assert!(
+            !saved.contains("private-abc") && !saved.contains("\"url\""),
+            "{saved}"
+        );
+        // Rechargé depuis le gestionnaire d'identifiants.
+        let saved: CalendarSettings = serde_json::from_value(w.save()).unwrap();
+        let mut again = CalendarWidget::new(saved, recorded(), vault.factory());
+        render(&mut again, 1);
+        wait(&mut again);
+        assert!(again.slots.values().all(|s| s.agenda.is_some()));
+
+        // Agenda retiré : son entrée aussi.
+        again.remove_calendar(0);
+        assert!(again.s.calendars.is_empty());
+        assert!(vault.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_missing_address_is_reported() {
+        let mut s = settings(&[], View::Agenda);
+        s.calendars.push(CalendarSource {
+            id: "perdu".into(),
+            host: "google.test".into(),
+            ..Default::default()
+        });
+        let (mut w, _) = widget(s);
+        render(&mut w, 1);
+        wait(&mut w);
+        assert_eq!(
+            w.slots.values().next().unwrap().error,
+            Some(LoadError::NoAddress)
+        );
     }
 }

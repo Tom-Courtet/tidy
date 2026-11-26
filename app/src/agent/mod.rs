@@ -35,6 +35,8 @@ use winit::window::WindowId;
 
 use crate::ipc::{self, Request, Response, Status};
 use hotkeys::{Action, Hotkeys};
+#[cfg(test)]
+pub(crate) use supervisor::desktop_quit_event;
 use supervisor::{Command, Shared, Supervisor};
 use tray::{MenuChoice, Tray, TrayView};
 
@@ -55,8 +57,8 @@ enum UserEvent {
 
 /// Lance l'agent ; rend la main quand on le quitte. `open_manager` : ouvrir aussi la
 /// fenêtre principale (lancement à la main, pas à l'ouverture de session).
-pub fn run(store: Store, open_manager: bool) -> Result<()> {
-    let listener = ipc::bind(&store)?;
+pub fn run(store: Store, lock: ipc::InstanceLock, open_manager: bool) -> Result<()> {
+    let (listener, auth) = ipc::bind(&store, &lock)?;
     let _socket_guard = SocketGuard(store.socket_path());
     let settings: Settings = store.load();
     crate::lang::apply(settings.language);
@@ -76,7 +78,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
     let bus = EventBus::default();
     let shared = Arc::new(Mutex::new(Shared::default()));
     let desktop_hidden = Arc::new(Mutex::new(false));
-    let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
+    let supervisor = Supervisor::spawn(store.clone(), bus.clone(), Arc::clone(&shared))?;
     supervisor.send(Command::Apply(settings.effective_desktop_mode()));
     organizer::start(store.clone(), bus.clone(), Arc::clone(&shared));
     {
@@ -117,14 +119,14 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     bus.publish(Event::CreateBox { at: None });
                     Ok(Response::Ok)
                 }
-                Request::Desktop { command } => {
-                    let running = shared.lock().is_ok_and(|s| s.desktop_running);
-                    Ok(organizer::route(&store, &bus, running, command))
-                }
+                Request::Desktop { command } => Ok(organizer::route(&store, &bus, command)),
                 Request::ApplyRules { all } => Ok(organizer::apply_rules(&store, &bus, all)),
                 Request::UndoOrganize => Ok(organizer::undo(&store, &bus)),
                 Request::RestoreFinder => send(UserEvent::RestoreFinder),
                 Request::DesktopReady => {
+                    // Commandes reçues pendant le démarrage du bureau : relayées
+                    // maintenant qu'il est abonné.
+                    organizer::desktop_ready(&bus, &shared);
                     supervisor.send(Command::DesktopReady);
                     Ok(Response::Ok)
                 }
@@ -140,7 +142,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
             })
         }
     };
-    ipc::serve(listener, bus.clone(), handler)?;
+    ipc::serve(listener, auth, bus.clone(), handler)?;
 
     let mut app = App {
         store,
@@ -159,6 +161,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
         .run_app(&mut app)
         .context("boucle d'événements")?;
     log::info!("agent arrêté");
+    drop(lock);
     Ok(())
 }
 
@@ -300,7 +303,13 @@ impl App {
     }
 
     fn reload_settings(&mut self) {
-        let old = std::mem::replace(&mut self.settings, self.store.load());
+        // Lecture impossible (fichier verrouillé un instant) : réglages en cours gardés,
+        // plutôt que des valeurs par défaut (mode du bureau, raccourcis…).
+        let mut new = self.settings.clone();
+        if !self.store.reload(&mut new) {
+            return;
+        }
+        let old = std::mem::replace(&mut self.settings, new);
         crate::lang::apply(self.settings.language);
         if old.hotkeys != self.settings.hotkeys {
             self.register_hotkeys();
@@ -385,9 +394,12 @@ impl App {
 
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         log::info!("arrêt demandé");
+        let platform = tidy_platform::current();
+        // Avant toute attente (bureau, jusqu'à SHUTDOWN_GRACE ; Explorateur) : le
+        // crochet souris global porté par ce thread ne répondrait plus.
+        platform.stop_desktop_watch();
         self.bus.publish(Event::Shutdown);
         self.supervisor.shutdown();
-        let platform = tidy_platform::current();
         if platform.desktop_icons_hidden() {
             let _ = platform.set_desktop_icons_hidden(false);
         }

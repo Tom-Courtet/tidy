@@ -110,17 +110,20 @@ fn run(store: &Store, bus: &EventBus, dirs: &[PathBuf]) -> Result<()> {
             }
         };
         let changes = diff(&known, &current, &hints);
-        if !changes.is_empty() {
-            handle(store, bus, &changes);
+        // État illisible un instant : les changements seront repris au prochain tour.
+        if changes.is_empty() || handle(store, bus, &changes) {
+            known = current;
         }
-        known = current;
     }
 }
 
 /// Éléments arrivés pendant que Tidy ne tournait pas.
 fn catch_up(store: &Store, bus: &EventBus, entries: &[DesktopEntry]) {
     let _organizing = organizer::organizing();
-    let state: DesktopState = store.load();
+    let Ok(state) = store.load_checked::<DesktopState>() else {
+        log::warn!("surveillance du bureau : état illisible, rattrapage remis");
+        return;
+    };
     if !state.boxes.iter().any(|b| b.kind == BoxKind::Normal) {
         // Rien où ranger : le démarrage rapide s'en chargera.
         return;
@@ -132,7 +135,10 @@ fn catch_up(store: &Store, bus: &EventBus, entries: &[DesktopEntry]) {
     if unknown.is_empty() {
         return;
     }
-    let settings: Settings = store.load();
+    let Ok(settings) = store.load_checked::<Settings>() else {
+        log::warn!("surveillance du bureau : réglages illisibles, rattrapage remis");
+        return;
+    };
     let commands = organize::plan_new_items(
         &state,
         &settings.organization,
@@ -149,11 +155,24 @@ fn catch_up(store: &Store, bus: &EventBus, entries: &[DesktopEntry]) {
     }
 }
 
-/// Fait suivre les changements à l'état du bureau.
-fn handle(store: &Store, bus: &EventBus, changes: &Changes) {
+/// Fait suivre les changements à l'état du bureau. `false` : état ou réglages
+/// illisibles, rien n'est fait (à reprendre).
+fn handle(store: &Store, bus: &EventBus, changes: &Changes) -> bool {
     let _organizing = organizer::organizing();
-    let mut view: DesktopState = store.load();
-    let settings: Settings = store.load();
+    // Lectures strictes : planifier sur un bureau vide (fichier verrouillé un instant)
+    // enverrait des commandes fausses.
+    let (mut view, settings) = match (
+        store.load_checked::<DesktopState>(),
+        store.load_checked::<Settings>(),
+    ) {
+        (Ok(view), Ok(settings)) => (view, settings),
+        (Err(e), _) | (_, Err(e)) => {
+            log::warn!(
+                "état du bureau non mis à jour : {e:#} (nouvel essai au prochain changement)"
+            );
+            return false;
+        }
+    };
     let commands = plan(&mut view, &settings, changes, Timestamp::now());
     log::debug!(
         "bureau : {} ajouté(s), {} retiré(s), {} renommé(s)",
@@ -165,6 +184,7 @@ fn handle(store: &Store, bus: &EventBus, changes: &Changes) {
         log::warn!("état du bureau non mis à jour : {e}");
     }
     bus.publish(Event::DesktopFilesChanged);
+    true
 }
 
 /// Commandes qui reportent `changes` sur l'état. `view` est mis à jour au fur et à

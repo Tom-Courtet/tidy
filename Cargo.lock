@@ -2841,6 +2841,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "egui",
+ "getrandom",
  "global-hotkey",
  "jiff",
  "log",
@@ -2949,6 +2950,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tidy-platform",
  "zeroize",
 ]
 

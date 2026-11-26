@@ -155,8 +155,10 @@ pub fn run(store: Store) -> Result<()> {
 
 /// Fenêtre d'un écran et son lecteur.
 struct Surface {
-    window: Window,
+    /// Avant `window` : le lecteur (qui dessine dans la fenêtre) s'arrête avant que la
+    /// fenêtre soit détruite (les champs sont libérés dans l'ordre).
     player: Option<Player>,
+    window: Window,
     frame: Rect,
     path: PathBuf,
 }
@@ -238,8 +240,8 @@ fn create_surface(
         wanted.path.display()
     );
     Ok(Surface {
-        window,
         player,
+        window,
         frame: f,
         path: wanted.path.clone(),
     })
@@ -258,9 +260,9 @@ impl ApplicationHandler<Msg> for App {
             }
             _ => {}
         }
-        // Sous Windows, le lecteur demande un coup d'œil régulier (fin de vidéo) ; sous
-        // macOS, AVFoundation boucle seul : on dort.
-        if cfg!(windows) {
+        // Sous Windows, le lecteur demande un coup d'œil régulier (fin de vidéo), mais
+        // pas en pause ; sous macOS, AVFoundation boucle seul : on dort.
+        if cfg!(windows) && !self.state.paused {
             event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);

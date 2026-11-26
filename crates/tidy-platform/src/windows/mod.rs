@@ -130,6 +130,10 @@ impl DesktopPlatform for WindowsPlatform {
         desktop::watch_drag(on_rect)
     }
 
+    fn stop_desktop_watch(&self) {
+        desktop::unhook();
+    }
+
     fn raise_desktop_surface(&self, title: &str, raised: bool) {
         match window::find_titled(title) {
             Some(hwnd) => window::raise(hwnd, raised),
