@@ -10,6 +10,7 @@ pub mod events;
 pub mod geometry;
 pub mod grid;
 pub mod icon_stash;
+pub mod layouts;
 pub mod model;
 pub mod organize;
 pub mod rules;

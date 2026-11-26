@@ -10,6 +10,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+use tidy_core::layouts::Uuid;
 use tidy_core::settings::Hotkeys as HotkeySettings;
 
 /// Action d'un raccourci global.
@@ -19,6 +20,8 @@ pub enum Action {
     ToggleDesktop,
     QuickAccess,
     MainWindow,
+    /// Appliquer une disposition nommée (lot E).
+    Layout(Uuid),
 }
 
 /// Raccourcis voulus, d'après les réglages.
@@ -42,14 +45,19 @@ pub struct Hotkeys {
 
 impl Hotkeys {
     /// `on_action(action, appui)` est appelé à chaque appui (`true`) et relâchement.
+    /// `layouts` : raccourcis des dispositions nommées.
     pub fn register(
         settings: &HotkeySettings,
+        layouts: &[(Uuid, String)],
         on_action: impl Fn(Action, bool) + Send + Sync + 'static,
     ) -> Result<Self> {
         let manager = GlobalHotKeyManager::new().context("raccourcis globaux indisponibles")?;
         let mut table = HashMap::new();
         let mut registered = Vec::new();
-        for (action, text) in wanted(settings) {
+        let layouts = layouts
+            .iter()
+            .map(|(id, text)| (Action::Layout(*id), text.as_str()));
+        for (action, text) in wanted(settings).into_iter().chain(layouts) {
             let hotkey = match HotKey::from_str(text) {
                 Ok(h) => h,
                 Err(e) => {

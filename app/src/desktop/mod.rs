@@ -41,10 +41,12 @@ use anyhow::Result;
 use egui::{ViewportBuilder, ViewportCommand, ViewportId, pos2};
 use tidy_core::events::Event;
 use tidy_core::geometry::{Point, Rect};
+use tidy_core::layouts::resolve_placement;
 use tidy_core::model::{Appearance, BoxId, BoxKind, DeskBox, SortKey, Tab};
 use tidy_core::rules::ItemInfo;
 use tidy_core::scan::scan_desktop_located;
 use tidy_core::screen::Screen;
+use tidy_core::settings::ResolutionPolicy;
 use tidy_core::snap::{Edges, SnapContext, snap, snap_resize};
 use tidy_core::store::{desktop_dir, public_desktop_dir};
 use tidy_core::{DesktopState, Settings, Store};
@@ -463,9 +465,10 @@ impl Desktop {
     /// supprimées. Même chose pour les portails.
     fn sync_windows(&mut self) {
         let screens = &self.screens;
+        let policy = self.settings.layout.on_resolution_change;
         for (i, b) in self.state.boxes.iter().enumerate() {
             self.windows.entry(b.id).or_insert_with(|| {
-                let (screen, rect) = match b.placement.resolve(screens) {
+                let (screen, rect) = match resolve_placement(&b.placement, screens, policy) {
                     Some((id, r)) => (screens.iter().find(|s| s.id == id).cloned(), r),
                     None => (None, default_rect(screens, i)),
                 };
@@ -637,8 +640,14 @@ impl Desktop {
                 }
                 Event::Desktop { command } => {
                     // Seul écrivain de `desktop.json` (voir `DesktopCommand`).
+                    let replace = matches!(command, tidy_core::DesktopCommand::Replace { .. });
                     self.state.apply(command);
                     self.sync_windows();
+                    if replace {
+                        // Instantané ou disposition restaurés : chaque boîte reprend
+                        // la place enregistrée.
+                        self.place_windows(true);
+                    }
                     self.save(true);
                 }
                 Event::DesktopFilesChanged => self.desktop_files_changed(),
@@ -726,20 +735,40 @@ impl Desktop {
         changed
     }
 
-    /// Les écrans ont changé : chaque boîte reprend la place mémorisée pour la nouvelle
-    /// configuration.
+    /// Les écrans ont changé : chaque boîte reprend sa place selon le réglage du
+    /// changement de résolution (`LayoutSettings::on_resolution_change`) :
+    /// - mémoriser : la place enregistrée pour la nouvelle configuration d'écrans ;
+    /// - redimensionner : la même, à l'échelle de la nouvelle taille de l'écran ;
+    /// - ne rien faire : les boîtes restent où elles sont, sauf celles qui ne sont plus
+    ///   sur aucun écran.
     fn screens_changed(&mut self, screens: Vec<Screen>) {
         if screens.is_empty() {
             return;
         }
         self.screens = screens;
+        self.place_windows(false);
+    }
+
+    /// Replace les fenêtres des boîtes d'après leurs positions enregistrées. `always` :
+    /// même avec « ne rien faire » (restauration d'une disposition).
+    fn place_windows(&mut self, always: bool) {
+        let policy = match self.settings.layout.on_resolution_change {
+            ResolutionPolicy::Nothing if always => ResolutionPolicy::RememberPerResolution,
+            policy => policy,
+        };
         for (i, b) in self.state.boxes.iter().enumerate() {
             let Some(win) = self.windows.get_mut(&b.id) else {
                 continue;
             };
-            let rect = b
-                .placement
-                .resolve(&self.screens)
+            if policy == ResolutionPolicy::Nothing
+                && self
+                    .screens
+                    .iter()
+                    .any(|s| s.frame.contains(center(win.current)))
+            {
+                continue;
+            }
+            let rect = resolve_placement(&b.placement, &self.screens, policy)
                 .map(|(_, r)| r)
                 .unwrap_or_else(|| default_rect(&self.screens, i));
             win.current = rect;

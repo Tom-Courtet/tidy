@@ -13,6 +13,7 @@
 
 mod appearance;
 mod boxes;
+mod layouts;
 mod onboarding;
 mod organization;
 mod pages;
