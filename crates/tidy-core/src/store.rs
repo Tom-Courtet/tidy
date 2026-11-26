@@ -115,22 +115,40 @@ impl Store {
     /// Lit `T`. Absent : valeurs par défaut. Illisible ou trop récent : mis de côté en
     /// `.bad`, valeurs par défaut.
     pub fn load<T: Versioned>(&self) -> T {
+        self.load_checked().unwrap_or_else(|e| {
+            log::warn!("{e:#}");
+            T::default()
+        })
+    }
+
+    /// Comme [`Store::load`], mais une erreur de lecture (fichier verrouillé un instant
+    /// par un antivirus ou une synchronisation, accès refusé) rend `Err` au lieu des
+    /// valeurs par défaut : à utiliser avant de réécrire le fichier, pour ne jamais
+    /// remplacer des données qu'on n'a pas pu lire.
+    pub fn load_checked<T: Versioned>(&self) -> Result<T> {
         let path = self.path_of::<T>();
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return T::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
             Err(e) => {
-                log::warn!("lecture de {} impossible : {e}", path.display());
-                return T::default();
+                return Err(e).with_context(|| format!("lecture de {} impossible", path.display()));
             }
         };
         let parsed = serde_json::from_str::<serde_json::Value>(&text)
             .map_err(anyhow::Error::from)
             .and_then(migrate::<T>);
-        match parsed {
+        Ok(match parsed {
             Ok(value) => value,
             Err(e) => {
-                let bad = path.with_extension("json.bad");
+                // Une copie `.bad` plus ancienne n'est jamais écrasée.
+                let mut bad = path.with_extension("json.bad");
+                if bad.exists() {
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis())
+                        .unwrap_or_default();
+                    bad = path.with_extension(format!("json.bad-{stamp}"));
+                }
                 log::warn!(
                     "{} illisible ({e:#}) : mis de côté dans {}",
                     path.display(),
@@ -139,7 +157,24 @@ impl Store {
                 let _ = fs::rename(&path, &bad);
                 T::default()
             }
-        }
+        })
+    }
+
+    /// Lit `T` sans jamais rien mettre de côté : absent, valeurs par défaut ; erreur de
+    /// lecture (fichier verrouillé un instant…) ou contenu illisible, `Err`. Pour les
+    /// fichiers qu'il serait dangereux de remplacer par des valeurs par défaut (journal
+    /// des icônes masquées…).
+    pub fn try_load<T: Versioned>(&self) -> Result<T> {
+        let path = self.path_of::<T>();
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
+            Err(e) => return Err(e).with_context(|| format!("lecture de {}", path.display())),
+        };
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(anyhow::Error::from)
+            .and_then(migrate::<T>)
+            .with_context(|| format!("{} illisible", path.display()))
     }
 
     /// Enregistre `value` de façon atomique.
@@ -196,15 +231,23 @@ pub fn resolve_desktop_item(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().context("chemin sans dossier")?;
     fs::create_dir_all(dir)?;
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    {
+    // Nom propre au processus et à l'écriture : deux fils qui enregistrent le même
+    // fichier n'écrivent jamais dans le même fichier temporaire.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp-{}-{n}", std::process::id()));
+    let written = (|| -> Result<()> {
         let mut file =
             fs::File::create(&tmp).with_context(|| format!("création de {}", tmp.display()))?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        drop(file);
+        fs::rename(&tmp, path).with_context(|| format!("écriture de {}", path.display()))
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, path).with_context(|| format!("écriture de {}", path.display()))?;
-    Ok(())
+    written
 }
 
 #[cfg(test)]
@@ -230,6 +273,80 @@ mod tests {
         fs::write(store.path_of::<Settings>(), "{ pas du json").unwrap();
         assert_eq!(store.load::<Settings>(), Settings::default());
         assert!(dir.path().join("config.json.bad").exists());
+        // Un second incident ne remplace pas la première copie.
+        fs::write(store.path_of::<Settings>(), "{ encore abîmé").unwrap();
+        assert_eq!(store.load::<Settings>(), Settings::default());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("config.json.bad")).unwrap(),
+            "{ pas du json"
+        );
+        let copies = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("config.json.bad")
+            })
+            .count();
+        assert_eq!(copies, 2);
+    }
+
+    #[test]
+    fn read_errors_are_reported_before_a_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert!(store.load_checked::<Settings>().is_ok(), "absent : défauts");
+        // Un dossier à la place du fichier : la lecture échoue (comme un fichier
+        // verrouillé).
+        fs::create_dir(store.path_of::<Settings>()).unwrap();
+        assert!(store.load_checked::<Settings>().is_err());
+        assert_eq!(store.load::<Settings>(), Settings::default());
+    }
+
+    #[test]
+    fn strict_load_never_sets_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.try_load::<Settings>().unwrap(), Settings::default());
+        fs::write(store.path_of::<Settings>(), "{ pas du json").unwrap();
+        assert!(store.try_load::<Settings>().is_err());
+        assert!(
+            store.path_of::<Settings>().exists(),
+            "fichier laissé en place"
+        );
+        assert!(!dir.path().join("config.json.bad").exists());
+    }
+
+    #[test]
+    fn concurrent_saves_never_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    let s = Settings {
+                        desktop_mode: if i % 2 == 0 {
+                            DesktopMode::Off
+                        } else {
+                            DesktopMode::Overlay
+                        },
+                        ..Settings::default()
+                    };
+                    for _ in 0..20 {
+                        // Sous Windows, un renommage concurrent peut être refusé : seul
+                        // compte le fichier final, jamais mélangé.
+                        let _ = store.save(&s);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let text = fs::read_to_string(store.path_of::<Settings>()).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
     }
 
     #[test]

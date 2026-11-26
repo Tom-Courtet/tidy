@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use tidy_core::icon_stash::{self, SyncReport};
+use tidy_core::settings::{DesktopMode, Settings};
 use tidy_core::store::{desktop_dirs, resolve_desktop_item};
 use tidy_core::{DesktopState, Store};
 
@@ -23,7 +24,14 @@ pub fn boxed_paths(state: &DesktopState) -> Vec<PathBuf> {
 /// Masque les icônes rangées et rend les autres. `None` : pas disponible sur cet OS.
 pub fn sync(store: &Store, extra: &[PathBuf]) -> Option<Result<SyncReport>> {
     let icons = tidy_platform::current().desktop_icon_positions()?;
-    let mut boxed = boxed_paths(&store.load());
+    // Boîtes désactivées : rien ne les montre, les icônes rangées restent donc sur le
+    // bureau du système (sinon les fichiers seraient invisibles).
+    let boxes_shown = store.load::<Settings>().effective_desktop_mode() != DesktopMode::Off;
+    let mut boxed = if boxes_shown {
+        boxed_paths(&store.load())
+    } else {
+        Vec::new()
+    };
     boxed.extend_from_slice(extra);
     Some(icon_stash::sync(store, icons, &boxed))
 }

@@ -368,7 +368,9 @@ fn digits(s: &str) -> Option<i32> {
 
 /// `20261126`.
 fn parse_date(s: &str) -> Option<Date> {
-    if s.len() != 8 {
+    // ASCII seulement : les découpages qui suivent sont en octets (un caractère
+    // multi-octets ferait paniquer, et un agenda tiers ne doit pas arrêter le bureau).
+    if s.len() != 8 || !s.is_ascii() {
         return None;
     }
     let y = i16::try_from(digits(&s[0..4])?).ok()?;
@@ -385,7 +387,7 @@ fn parse_datetime(s: &str) -> Option<(DateTime, bool)> {
     };
     let (date, time) = s.split_once(['T', 't'])?;
     let date = parse_date(date)?;
-    if time.len() < 4 {
+    if time.len() < 4 || !time.is_ascii() {
         return None;
     }
     let h = i8::try_from(digits(&time[0..2])?).ok()?;
@@ -1093,6 +1095,14 @@ fn candidates(rule: &RRule, start: Date, i: i64) -> Option<(Date, Vec<Date>)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn non_ascii_dates_are_refused_without_panicking() {
+        assert!(super::parse_date("202é126").is_none());
+        assert!(super::parse_datetime("20261126T1é00").is_none());
+        assert!(super::parse_datetime("20261126T09é0Z").is_none());
+        assert!(super::parse_datetime("20261126T0900").is_some());
+    }
+
     use super::*;
     use jiff::civil::date;
 

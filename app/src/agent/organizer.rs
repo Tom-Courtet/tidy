@@ -68,7 +68,16 @@ pub fn route(
         return Response::Ok;
     }
     let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
-    let mut state: DesktopState = store.load();
+    // Un fichier qu'on n'a pas pu lire n'est jamais réécrit (il serait remplacé par un
+    // bureau vide).
+    let mut state: DesktopState = match store.load_checked() {
+        Ok(state) => state,
+        Err(e) => {
+            return Response::Error {
+                message: format!("{e:#}"),
+            };
+        }
+    };
     state.apply(command);
     match store.save(&state) {
         Ok(()) => {

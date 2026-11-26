@@ -235,7 +235,9 @@ impl WidgetHost {
             }
         }
         if let Some(d) = repaint {
-            ctx.request_repaint_after(d);
+            // Plancher : toutes les fenêtres du bureau sont redessinées ensemble ; un
+            // widget qui rendrait une durée nulle ne doit pas les faire tourner à vide.
+            ctx.request_repaint_after(d.max(Duration::from_millis(100)));
         }
         for id in edits.removed {
             edits.changed.retain(|w| w.id != id);

@@ -63,8 +63,12 @@ impl Hit {
 pub fn display_name(name: &str, category: Category) -> &str {
     if matches!(category, Category::Application | Category::Game) {
         for ext in [".lnk", ".app", ".url", ".appref-ms"] {
-            if name.len() > ext.len() && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext) {
-                return &name[..name.len() - ext.len()];
+            // `get` : la coupure peut tomber au milieu d'un caractère (nom non ASCII).
+            if let Some(cut) = name.len().checked_sub(ext.len()).filter(|&n| n > 0)
+                && let (Some(stem), Some(tail)) = (name.get(..cut), name.get(cut..))
+                && tail.eq_ignore_ascii_case(ext)
+            {
+                return stem;
             }
         }
     }
@@ -314,6 +318,20 @@ mod tests {
 
     use super::*;
     use crate::config::Root;
+
+    #[test]
+    fn display_name_never_cuts_inside_a_character() {
+        // `.appref-ms` fait 10 octets : la coupure tomberait au milieu de « é ».
+        assert_eq!(
+            display_name("Pokémon 2.exe", Category::Application),
+            "Pokémon 2.exe"
+        );
+        assert_eq!(
+            display_name("Éditeur.LNK", Category::Application),
+            "Éditeur"
+        );
+        assert_eq!(display_name(".lnk", Category::Application), ".lnk");
+    }
 
     fn index() -> Index {
         let mut index = Index::new(vec![Root {

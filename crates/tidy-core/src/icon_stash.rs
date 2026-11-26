@@ -148,7 +148,9 @@ fn still_visible(icons: &dyn DesktopIcons, wanted: &[(PathBuf, IconPos)]) -> Res
 /// masquées par Tidy. `boxed` vide : tout est rendu.
 pub fn sync(store: &Store, icons: &dyn DesktopIcons, boxed: &[PathBuf]) -> Result<SyncReport> {
     let _lock = lock(store)?;
-    let mut stash: IconStash = store.load();
+    // Lecture stricte : un journal illisible remplacé par un journal vide perdrait les
+    // positions d'origine des icônes déjà masquées (elles resteraient hors de l'écran).
+    let mut stash: IconStash = store.try_load()?;
     let current = icons.positions()?;
     let mut report = SyncReport {
         on_desktop: current.len(),
@@ -316,6 +318,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
         (dir, store)
+    }
+
+    #[test]
+    fn unreadable_stash_stops_everything() {
+        let (_dir, store) = store();
+        let fake = Fake::with(&[(r"C:\Bureau\a.pdf", 10, 20)]);
+        std::fs::write(store.path_of::<IconStash>(), "{ abîmé").unwrap();
+        let boxed = [PathBuf::from(r"C:\Bureau\a.pdf")];
+        assert!(sync(&store, &fake, &boxed).is_err());
+        assert!(restore_all(&store, &fake).is_err());
+        // Rien n'a bougé, et le journal est resté tel quel.
+        assert_eq!(fake.pos(r"C:\Bureau\a.pdf"), IconPos { x: 10, y: 20 });
+        assert_eq!(
+            std::fs::read_to_string(store.path_of::<IconStash>()).unwrap(),
+            "{ abîmé"
+        );
     }
 
     #[test]

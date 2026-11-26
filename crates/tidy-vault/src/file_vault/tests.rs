@@ -464,3 +464,17 @@ fn symlinks_are_refused() {
         assert!(b.objects().is_empty());
     }
 }
+
+#[test]
+fn only_one_process_at_a_time() {
+    let b = Bench::new();
+    let (mut first, _) = b.created();
+    let mut second = b.vault();
+    assert!(matches!(second.unlock(PW), Err(VaultError::Io { .. })));
+    assert!(!second.is_unlocked());
+    first.lock();
+    second.unlock(PW).unwrap();
+    assert!(matches!(first.unlock(PW), Err(VaultError::Io { .. })));
+    second.lock();
+    first.unlock(PW).unwrap();
+}

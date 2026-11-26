@@ -146,6 +146,12 @@ pub fn restore_original(store: &Store) -> anyhow::Result<bool> {
         return Ok(false);
     }
     let original: OriginalWallpaper = store.load();
+    // Un relevé vide (fichier illisible, aucun écran vu) n'est pas « couleur unie » :
+    // le rendre effacerait le vrai fond. Le fichier est gardé.
+    anyhow::ensure!(
+        !original.screens.is_empty(),
+        "fond d'écran d'origine illisible ou vide : fichier gardé"
+    );
     tidy_platform::current().restore_wallpaper(&original)?;
     let _ = std::fs::remove_file(&path);
     log::info!("fond d'écran d'origine rendu");
@@ -245,7 +251,9 @@ impl Controller {
                     self.tick();
                 }
                 Ok(Msg::Bus(Event::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {
-                    self.player.stop();
+                    // Comme à l'arrêt d'une vidéo : Windows redessine le vrai fond, sinon
+                    // la dernière image peut rester sur le bureau.
+                    self.stop_video();
                     return;
                 }
                 Ok(Msg::Bus(_)) => {}
@@ -492,6 +500,11 @@ impl Controller {
             log::warn!("fond d'écran d'origine illisible : il ne pourra pas être rendu");
             return;
         };
+        if original.screens.is_empty() {
+            // Aucun écran vu (ouverture de session) : relevé au prochain changement.
+            log::warn!("fond d'écran d'origine : aucun écran relevé, nouvel essai plus tard");
+            return;
+        }
         secure_original(self.store.root(), &mut original);
         match self.store.save(&original) {
             Ok(()) => log::info!("fond d'écran d'origine noté"),
@@ -685,5 +698,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
         assert!(!restore_original(&store).unwrap());
+    }
+
+    #[test]
+    fn an_empty_snapshot_is_kept_not_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store.save(&OriginalWallpaper::default()).unwrap();
+        assert!(restore_original(&store).is_err());
+        assert!(store.path_of::<OriginalWallpaper>().exists());
     }
 }

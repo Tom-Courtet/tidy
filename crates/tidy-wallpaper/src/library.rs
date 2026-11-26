@@ -112,8 +112,30 @@ impl Versioned for Library {
 }
 
 /// Chemin canonique (liens et `..` résolus), ou le chemin tel quel s'il n'existe pas.
+/// Sous Windows, sans le préfixe `\\?\` que `canonicalize` ajoute : l'Explorateur
+/// (« Afficher »), le shell (miniatures) et le fond d'écran ne le comprennent pas.
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+    let Ok(resolved) = std::fs::canonicalize(path) else {
+        return path.to_owned();
+    };
+    if cfg!(windows)
+        && let Some(plain) = resolved.to_str().and_then(without_verbatim)
+    {
+        return PathBuf::from(plain);
+    }
+    resolved
+}
+
+/// `\\?\C:\dossier` → `C:\dossier`, `\\?\UNC\serveur\partage` → `\\serveur\partage`.
+/// `None` pour un chemin sans ce préfixe ou d'une autre forme (volume par GUID…).
+fn without_verbatim(path: &str) -> Option<String> {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return Some(format!(r"\\{rest}"));
+    }
+    let rest = path.strip_prefix(r"\\?\")?;
+    let bytes = rest.as_bytes();
+    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        .then(|| rest.to_owned())
 }
 
 fn display_name(path: &Path) -> String {
@@ -134,7 +156,16 @@ impl Library {
     /// Fond déjà importé pour ce fichier.
     pub fn find_path(&self, path: &Path) -> Option<&Wallpaper> {
         let wanted = canonical(path);
-        self.items.iter().find(|w| canonical(&w.path) == wanted)
+        // Les chemins enregistrés sont déjà canoniques : pas de nouvel appel au disque
+        // par fond (l'import d'un gros dossier devenait quadratique). Une ancienne
+        // entrée avec le préfixe `\\?\` (Windows) est reconnue sans lui.
+        self.items.iter().find(|w| {
+            w.path == wanted
+                || w.path
+                    .to_str()
+                    .and_then(without_verbatim)
+                    .is_some_and(|p| Path::new(&p) == wanted)
+        })
     }
 
     /// Importe un fichier (référencé par son chemin canonique), dans `category`.
@@ -294,6 +325,20 @@ mod tests {
     use tidy_core::Store;
 
     use super::*;
+
+    #[test]
+    fn verbatim_prefix_is_removed() {
+        assert_eq!(
+            without_verbatim(r"\\?\C:\Images\été.jpg").as_deref(),
+            Some(r"C:\Images\été.jpg")
+        );
+        assert_eq!(
+            without_verbatim(r"\\?\UNC\nas\photos\a.png").as_deref(),
+            Some(r"\\nas\photos\a.png")
+        );
+        assert_eq!(without_verbatim(r"C:\Images\a.jpg"), None);
+        assert_eq!(without_verbatim(r"\\?\Volume{1234}\a.jpg"), None);
+    }
 
     fn touch(path: &Path) {
         if let Some(dir) = path.parent() {

@@ -336,6 +336,12 @@ impl Widget for QuickTools {
                 self.missing_until = Some(Instant::now() + Duration::from_secs(8));
             }
         }
+        if self
+            .missing_until
+            .is_some_and(|until| Instant::now() >= until)
+        {
+            self.missing_until = None;
+        }
         let rect = ui.max_rect();
         if self
             .missing_until
@@ -466,8 +472,12 @@ impl Widget for QuickTools {
     }
 
     fn repaint_after(&self) -> Option<Duration> {
+        // Message passé : plus de redessin (une durée nulle redessinerait tout le
+        // bureau à chaque image).
+        let now = Instant::now();
         self.missing_until
-            .map(|until| until.saturating_duration_since(Instant::now()))
+            .filter(|until| *until > now)
+            .map(|until| until - now)
     }
 
     fn preferred_size(&self) -> Option<[f32; 2]> {
@@ -485,6 +495,16 @@ impl Widget for QuickTools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_message_stops_repainting_once_over() {
+        let mut w = QuickTools::new(ToolsSettings::default());
+        assert_eq!(w.repaint_after(), None);
+        w.missing_until = Some(Instant::now() + Duration::from_secs(8));
+        assert!(w.repaint_after().is_some_and(|d| d > Duration::ZERO));
+        w.missing_until = Instant::now().checked_sub(Duration::from_secs(1));
+        assert_eq!(w.repaint_after(), None);
+    }
 
     #[test]
     fn run_value_is_parsed() {
