@@ -137,6 +137,9 @@ impl Worker {
             DesktopMode::Off => {
                 self.stop_child();
                 self.restore_finder();
+                // Plus de boîtes à l'écran : les icônes rangées reviennent sur le
+                // bureau du système (Windows).
+                crate::icons::restore_all(&self.store);
             }
             DesktopMode::Overlay => {
                 self.restore_finder();
@@ -233,6 +236,7 @@ impl Worker {
             );
             self.gave_up = true;
             self.restore_finder();
+            crate::icons::restore_all(&self.store);
             return;
         }
         log::info!("relance du bureau");
