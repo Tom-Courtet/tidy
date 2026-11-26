@@ -3,15 +3,18 @@
 //! Vit sur le thread principal. Les choix du menu repartent vers la boucle de l'agent.
 
 use anyhow::{Context, Result};
+use tidy_core::layouts::Uuid;
 use tidy_ui::t;
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 /// Ce qu'affiche le menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayView {
     pub boxes_enabled: bool,
     pub desktop_hidden: bool,
+    /// Dispositions nommées (sous-menu « Dispositions »).
+    pub layouts: Vec<(Uuid, String)>,
 }
 
 /// Choix fait dans le menu.
@@ -21,12 +24,20 @@ pub enum MenuChoice {
     ToggleBoxes,
     ToggleDesktop,
     Quit,
+    /// Revenir au dernier instantané qui diffère de la disposition actuelle.
+    RestorePreviousLayout,
+    ApplyLayout(Uuid),
+    OpenLayouts,
 }
 
 const OPEN_ID: &str = "open";
 const BOXES_ID: &str = "boxes";
 const DESKTOP_ID: &str = "desktop";
 const QUIT_ID: &str = "quit";
+const RESTORE_LAYOUT_ID: &str = "layouts-restore";
+const OPEN_LAYOUTS_ID: &str = "layouts-open";
+/// Préfixe des dispositions nommées, suivi de leur identifiant.
+const LAYOUT_PREFIX: &str = "layout:";
 
 fn parse_menu_id(id: &str) -> Option<MenuChoice> {
     match id {
@@ -34,7 +45,12 @@ fn parse_menu_id(id: &str) -> Option<MenuChoice> {
         BOXES_ID => Some(MenuChoice::ToggleBoxes),
         DESKTOP_ID => Some(MenuChoice::ToggleDesktop),
         QUIT_ID => Some(MenuChoice::Quit),
-        _ => None,
+        RESTORE_LAYOUT_ID => Some(MenuChoice::RestorePreviousLayout),
+        OPEN_LAYOUTS_ID => Some(MenuChoice::OpenLayouts),
+        _ => id
+            .strip_prefix(LAYOUT_PREFIX)
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .map(MenuChoice::ApplyLayout),
     }
 }
 
@@ -73,16 +89,16 @@ impl Tray {
     }
 
     pub fn show(&mut self, view: TrayView) {
-        if self.shown == Some(view) {
+        if self.shown.as_ref() == Some(&view) {
             return;
         }
-        if let Err(e) = self.rebuild_menu(view) {
+        if let Err(e) = self.rebuild_menu(&view) {
             log::warn!("menu de la barre des menus : {e:#}");
         }
         self.shown = Some(view);
     }
 
-    fn rebuild_menu(&mut self, view: TrayView) -> Result<()> {
+    fn rebuild_menu(&mut self, view: &TrayView) -> Result<()> {
         let menu = Menu::new();
         let desktop_label = if view.desktop_hidden {
             t!("tray.show_desktop")
@@ -100,12 +116,41 @@ impl Tray {
                 None,
             ),
             &MenuItem::with_id(DESKTOP_ID, desktop_label, view.boxes_enabled, None),
+            &layouts_menu(view)?,
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id(QUIT_ID, t!("tray.quit"), true, None),
         ])?;
         self.icon.set_menu(Some(Box::new(menu)));
         Ok(())
     }
+}
+
+/// Sous-menu « Dispositions » : revenir à la disposition précédente, appliquer une
+/// disposition nommée, gérer.
+fn layouts_menu(view: &TrayView) -> Result<Submenu> {
+    let menu = Submenu::new(t!("layouts.tray_menu"), view.boxes_enabled);
+    menu.append(&MenuItem::with_id(
+        RESTORE_LAYOUT_ID,
+        t!("layouts.tray_restore_previous"),
+        true,
+        None,
+    ))?;
+    menu.append(&PredefinedMenuItem::separator())?;
+    if view.layouts.is_empty() {
+        menu.append(&MenuItem::new(t!("layouts.tray_no_layout"), false, None))?;
+    }
+    for (id, name) in &view.layouts {
+        let item_id = format!("{LAYOUT_PREFIX}{}", id.simple());
+        menu.append(&MenuItem::with_id(item_id, name, true, None))?;
+    }
+    menu.append(&PredefinedMenuItem::separator())?;
+    menu.append(&MenuItem::with_id(
+        OPEN_LAYOUTS_ID,
+        t!("layouts.tray_manage"),
+        true,
+        None,
+    ))?;
+    Ok(menu)
 }
 
 /// Icône « modèle » (noir et transparence, macOS l'adapte au thème) : le logo de Tidy
@@ -173,9 +218,17 @@ mod tests {
             (BOXES_ID, MenuChoice::ToggleBoxes),
             (DESKTOP_ID, MenuChoice::ToggleDesktop),
             (QUIT_ID, MenuChoice::Quit),
+            (RESTORE_LAYOUT_ID, MenuChoice::RestorePreviousLayout),
+            (OPEN_LAYOUTS_ID, MenuChoice::OpenLayouts),
         ] {
             assert_eq!(parse_menu_id(id), Some(choice));
         }
+        let layout = Uuid::new_v4();
+        assert_eq!(
+            parse_menu_id(&format!("{LAYOUT_PREFIX}{}", layout.simple())),
+            Some(MenuChoice::ApplyLayout(layout))
+        );
+        assert_eq!(parse_menu_id("layout:pas-un-id"), None);
         assert_eq!(parse_menu_id("autre"), None);
     }
 

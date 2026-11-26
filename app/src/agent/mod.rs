@@ -10,6 +10,7 @@
 //! - **fil de surveillance** ([`supervisor`]) : processus du bureau, icônes du Finder.
 
 mod hotkeys;
+mod layouts;
 pub mod modules;
 pub mod organizer;
 mod supervisor;
@@ -45,6 +46,8 @@ enum UserEvent {
     ReloadSettings,
     ToggleDesktop,
     RestoreFinder,
+    /// Les dispositions nommées ont changé : raccourcis et menu à refaire.
+    LayoutsChanged,
     Quit,
 }
 
@@ -74,6 +77,12 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
     let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
     supervisor.send(Command::Apply(settings.effective_desktop_mode()));
     organizer::start(store.clone(), bus.clone(), Arc::clone(&shared));
+    {
+        let proxy = proxy.clone();
+        layouts::start(store.clone(), bus.clone(), move || {
+            let _ = proxy.send_event(UserEvent::LayoutsChanged);
+        });
+    }
 
     let handler = {
         let proxy = proxy.clone();
@@ -232,7 +241,8 @@ impl App {
         // L'ancien jeu d'abord : un même raccourci ne s'enregistre pas deux fois.
         self.hotkeys = None;
         let proxy = self.proxy.clone();
-        match Hotkeys::register(&self.settings.hotkeys, move |action, down| {
+        let layouts = layouts::hotkeys(&self.store);
+        match Hotkeys::register(&self.settings.hotkeys, &layouts, move |action, down| {
             let _ = proxy.send_event(UserEvent::Hotkey(action, down));
         }) {
             Ok(h) => self.hotkeys = Some(h),
@@ -244,6 +254,7 @@ impl App {
         let view = TrayView {
             boxes_enabled: self.settings.desktop_mode != DesktopMode::Off,
             desktop_hidden: self.desktop_hidden.lock().is_ok_and(|h| *h),
+            layouts: layouts::names(&self.store),
         };
         if let Some(tray) = &mut self.tray {
             tray.show(view);
@@ -391,6 +402,25 @@ impl ApplicationHandler<UserEvent> for App {
                 self.toggle_desktop()
             }
             UserEvent::Menu(MenuChoice::Quit) | UserEvent::Quit => self.quit(event_loop),
+            UserEvent::Menu(MenuChoice::RestorePreviousLayout) => layouts::run_in_background(
+                &self.store,
+                &self.bus,
+                "restore_previous",
+                serde_json::Value::Null,
+            ),
+            UserEvent::Menu(MenuChoice::ApplyLayout(id)) => layouts::run_in_background(
+                &self.store,
+                &self.bus,
+                "apply_layout",
+                serde_json::json!({ "id": id }),
+            ),
+            UserEvent::Menu(MenuChoice::OpenLayouts) => {
+                self.open_manager(Some(layouts::MODULE.into()))
+            }
+            UserEvent::LayoutsChanged => {
+                self.register_hotkeys();
+                self.refresh_tray();
+            }
             UserEvent::ReloadSettings => self.reload_settings(),
             UserEvent::RestoreFinder => self.save_settings(|s| {
                 if s.desktop_mode == DesktopMode::Managed {
@@ -401,6 +431,12 @@ impl ApplicationHandler<UserEvent> for App {
                 Action::ToggleDesktop if down => self.toggle_desktop(),
                 Action::MainWindow if down => self.open_manager(None),
                 Action::Search if down => self.bus.publish(Event::OpenSearch),
+                Action::Layout(id) if down => layouts::run_in_background(
+                    &self.store,
+                    &self.bus,
+                    "apply_layout",
+                    serde_json::json!({ "id": id }),
+                ),
                 Action::QuickAccess => match self.settings.hotkeys.quick_access_mode {
                     QuickAccessMode::Hold => {
                         self.quick_access = down;

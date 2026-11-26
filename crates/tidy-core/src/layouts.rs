@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+pub use uuid::Uuid;
 
 use crate::geometry::Rect;
 use crate::model::{DesktopState, ItemRef, Placement, ScreenPlacement};
@@ -340,8 +340,28 @@ pub struct ThumbBox {
     pub rolled: bool,
 }
 
+/// Taille d'une boîte sans position enregistrée (celle du processus du bureau).
+const DEFAULT_BOX: [f32; 2] = [320.0, 220.0];
+
+/// Place par défaut de la `i`-ième boîte sans position, comme le processus du bureau :
+/// en colonnes depuis le coin en haut à droite du cadre utile `v`, sans chevauchement.
+fn default_rect(v: Rect, i: usize) -> Rect {
+    let [w, h] = DEFAULT_BOX;
+    let (margin, gap) = (40.0, 10.0);
+    let rows = (((v.height - 2.0 * margin + gap) / (h + gap)).floor() as usize).max(1);
+    let (col, row) = ((i / rows) as f32, (i % rows) as f32);
+    Rect::new(
+        v.right() - margin - w - col * (w + gap),
+        v.y + margin + row * (h + gap),
+        w,
+        h,
+    )
+    .clamped_to(&v)
+}
+
 /// Miniature d'un état : cadres des boîtes posées sur l'écran principal, en fractions
-/// de son cadre (0 à 1), et proportions de l'écran (largeur / hauteur).
+/// de son cadre (0 à 1), et proportions de l'écran (largeur / hauteur). Une boîte jamais
+/// déplacée (sans position enregistrée) est dessinée à sa place par défaut.
 pub fn thumbnail(
     state: &DesktopState,
     screens: &[Screen],
@@ -359,8 +379,10 @@ pub fn thumbnail(
     let boxes = state
         .boxes
         .iter()
-        .filter_map(|b| {
-            let (screen, r) = resolve_placement(&b.placement, screens, policy)?;
+        .enumerate()
+        .filter_map(|(i, b)| {
+            let (screen, r) = resolve_placement(&b.placement, screens, policy)
+                .unwrap_or_else(|| (primary.id.clone(), default_rect(primary.visible_frame, i)));
             if screen != primary.id || f.width <= 0.0 || f.height <= 0.0 {
                 return None;
             }
@@ -902,7 +924,7 @@ mod tests {
         let main = screen("mac", 0.0, 1000.0, 500.0, true);
         let side = screen("dell", 1000.0, 1000.0, 500.0, false);
         let screens = [main.clone(), side.clone()];
-        let mut state = state_with(&["Ici", "Là", "Sans place"]);
+        let mut state = state_with(&["Ici", "Là"]);
         state.boxes[0]
             .placement
             .remember(&screens, &main, Rect::new(100.0, 50.0, 200.0, 100.0));
@@ -910,14 +932,22 @@ mod tests {
         state.boxes[1]
             .placement
             .remember(&screens, &side, Rect::new(1100.0, 50.0, 200.0, 100.0));
+        // Une boîte sans position : à sa place par défaut (en haut à droite).
+        state.boxes.push(DeskBox::new("Sans place"));
         let (ratio, boxes) = thumbnail(&state, &screens, ResolutionPolicy::RememberPerResolution);
         assert_eq!(ratio, 2.0);
+        assert_eq!(boxes.len(), 2, "la boîte de l'autre écran n'y est pas");
         assert_eq!(
-            boxes,
-            vec![ThumbBox {
+            boxes[0],
+            ThumbBox {
                 rect: Rect::new(0.1, 0.1, 0.2, 0.2),
                 rolled: true
-            }]
+            }
+        );
+        assert_eq!(
+            boxes[1].rect,
+            Rect::new(0.0, 0.08, 0.32, 0.44),
+            "troisième colonne, gardée dans l'écran"
         );
         assert!(
             thumbnail(&state, &[], ResolutionPolicy::Rescale)
