@@ -60,6 +60,8 @@ windows-sys = "0.61"
 windows = { version = "0.62.2", default-features = false }
 # Surveillance du dossier du bureau (agent, lot A).
 notify = "9.0.0"
+# Recherche floue de la recherche rapide (lot G). Licence MPL-2.0 (par fichier, pas GPL).
+nucleo-matcher = "0.3.1"
 
 [profile.release]
 opt-level = "s"
