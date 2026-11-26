@@ -13,6 +13,14 @@ serde.workspace = true
 serde_json.workspace = true
 tidy-core.workspace = true
 tidy-ui.workspace = true
+# Widgets en ligne (lot I) : météo, agendas ICS, chat IA, et leurs heures.
+jiff.workspace = true
+log.workspace = true
+tidy-integrations.workspace = true
+
+[dev-dependencies]
+# Aperçu des widgets sans l'hôte du bureau (`--example apercu`, lot I).
+eframe.workspace = true
 
 [lints]
 workspace = true

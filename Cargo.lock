@@ -2669,10 +2669,14 @@ version = "0.1.0"
 name = "tidy-widgets"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "egui",
+ "jiff",
+ "log",
  "serde",
  "serde_json",
  "tidy-core",
+ "tidy-integrations",
  "tidy-ui",
 ]
 
