@@ -42,7 +42,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use egui::{ViewportBuilder, ViewportCommand, ViewportId, pos2};
 use tidy_core::events::Event;
 use tidy_core::geometry::{Point, Rect};
@@ -76,6 +76,7 @@ const HOTKEY_RAISE: Duration = Duration::from_secs(4);
 const EXPECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub fn run(store: Store) -> Result<()> {
+    let state = load_state(&store)?;
     let settings: Settings = store.load();
     crate::lang::apply(settings.language);
     let screens = tidy_platform::current().screens();
@@ -154,11 +155,30 @@ pub fn run(store: Store) -> Result<()> {
             let _ = ctx_cell.set(ctx.clone());
             let channels = Channels::install(&ctx, &settings);
             Ok(Box::new(Desktop::new(
-                store, settings, screens, events, ctx, channels, with_agent,
+                store, state, settings, screens, events, ctx, channels, with_agent,
             )))
         }),
     )
     .map_err(|e| anyhow::anyhow!("bureau : {e}"))
+}
+
+/// État du bureau au démarrage. Le bureau est le seul écrivain de `desktop.json` :
+/// partir d'un état vide parce que le fichier était verrouillé un instant (antivirus,
+/// synchronisation) effacerait toutes les boîtes au premier enregistrement. On réessaie,
+/// puis on renonce (l'agent relance le bureau).
+fn load_state(store: &Store) -> Result<DesktopState> {
+    let mut tries = 0;
+    loop {
+        match store.load_checked::<DesktopState>() {
+            Ok(state) => return Ok(state),
+            Err(e) if tries < 10 => {
+                log::warn!("{e:#} : nouvel essai");
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            Err(e) => return Err(e).context("état du bureau illisible"),
+        }
+    }
 }
 
 /// Rend les icônes du bureau du système si Tidy les avait masquées.
@@ -373,6 +393,7 @@ impl Desktop {
     #[allow(clippy::too_many_arguments)]
     fn new(
         store: Store,
+        state: DesktopState,
         settings: Settings,
         screens: Vec<Screen>,
         events: Receiver<Event>,
@@ -382,7 +403,6 @@ impl Desktop {
     ) -> Self {
         // Pas de boîte de démonstration : les premières boîtes viennent de l'assistant
         // (démarrage rapide) ou de l'utilisateur.
-        let state: DesktopState = store.load();
         let desktop_dir = desktop_dir();
         let desktop_watch = if with_agent {
             None
@@ -652,7 +672,13 @@ impl Desktop {
                     self.widgets.settings_changed(&self.settings);
                 }
                 Event::DesktopChanged => {
-                    self.state = self.store.load();
+                    // Lecture impossible (fichier verrouillé un instant) : garder l'état
+                    // en mémoire, sinon le bureau, seul écrivain, enregistrerait un
+                    // bureau vide.
+                    match self.store.load_checked() {
+                        Ok(state) => self.state = state,
+                        Err(e) => log::warn!("{e:#} : état en mémoire gardé"),
+                    }
                     self.sync_windows();
                     self.icon_sync.request();
                 }

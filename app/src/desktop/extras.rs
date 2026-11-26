@@ -122,7 +122,14 @@ impl Desktop {
     /// comprise).
     fn toggle_rule_target(&mut self, b: BoxId, category: Option<Category>) {
         // Relire le fichier : la fenêtre principale a pu le changer entre-temps.
-        let mut settings: Settings = self.store.load();
+        let mut settings: Settings = match self.store.load_checked() {
+            Ok(settings) => settings,
+            Err(e) => {
+                log::error!("réglages non enregistrés : {e:#}");
+                self.notice(b, t!("box_extra.rules_save_failed"));
+                return;
+            }
+        };
         targets::toggle(&mut settings.organization, b, category);
         if let Err(e) = self.store.save(&settings) {
             log::error!("réglages non enregistrés : {e:#}");

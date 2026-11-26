@@ -330,7 +330,14 @@ impl App {
     }
 
     fn save_settings(&mut self, change: impl FnOnce(&mut Settings)) {
-        let mut settings = self.store.load::<Settings>();
+        let mut settings = match self.store.load_checked::<Settings>() {
+            Ok(settings) => settings,
+            Err(e) => {
+                // Ne pas remplacer des réglages illisibles par les valeurs par défaut.
+                log::error!("réglages non enregistrés : {e:#}");
+                return;
+            }
+        };
         change(&mut settings);
         if let Err(e) = self.store.save(&settings) {
             log::error!("réglages non enregistrés : {e:#}");

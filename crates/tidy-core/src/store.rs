@@ -115,19 +115,29 @@ impl Store {
     /// Lit `T`. Absent : valeurs par défaut. Illisible ou trop récent : mis de côté en
     /// `.bad`, valeurs par défaut.
     pub fn load<T: Versioned>(&self) -> T {
+        self.load_checked().unwrap_or_else(|e| {
+            log::warn!("{e:#}");
+            T::default()
+        })
+    }
+
+    /// Comme [`Store::load`], mais une erreur de lecture (fichier verrouillé un instant
+    /// par un antivirus ou une synchronisation, accès refusé) rend `Err` au lieu des
+    /// valeurs par défaut : à utiliser avant de réécrire le fichier, pour ne jamais
+    /// remplacer des données qu'on n'a pas pu lire.
+    pub fn load_checked<T: Versioned>(&self) -> Result<T> {
         let path = self.path_of::<T>();
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return T::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
             Err(e) => {
-                log::warn!("lecture de {} impossible : {e}", path.display());
-                return T::default();
+                return Err(e).with_context(|| format!("lecture de {} impossible", path.display()));
             }
         };
         let parsed = serde_json::from_str::<serde_json::Value>(&text)
             .map_err(anyhow::Error::from)
             .and_then(migrate::<T>);
-        match parsed {
+        Ok(match parsed {
             Ok(value) => value,
             Err(e) => {
                 // Une copie `.bad` plus ancienne n'est jamais écrasée.
@@ -147,7 +157,7 @@ impl Store {
                 let _ = fs::rename(&path, &bad);
                 T::default()
             }
-        }
+        })
     }
 
     /// Lit `T` sans jamais rien mettre de côté : absent, valeurs par défaut ; erreur de
@@ -280,6 +290,18 @@ mod tests {
             })
             .count();
         assert_eq!(copies, 2);
+    }
+
+    #[test]
+    fn read_errors_are_reported_before_a_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert!(store.load_checked::<Settings>().is_ok(), "absent : défauts");
+        // Un dossier à la place du fichier : la lecture échoue (comme un fichier
+        // verrouillé).
+        fs::create_dir(store.path_of::<Settings>()).unwrap();
+        assert!(store.load_checked::<Settings>().is_err());
+        assert_eq!(store.load::<Settings>(), Settings::default());
     }
 
     #[test]
