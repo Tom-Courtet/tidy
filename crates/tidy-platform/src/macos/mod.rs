@@ -1,6 +1,8 @@
 //! Implémentation macOS (AppKit et CoreGraphics via objc2).
 
+mod desktop_drag;
 mod files;
+mod glass;
 mod login;
 pub mod reopen;
 mod screens;
@@ -16,7 +18,7 @@ use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::screen::Screen;
 
-use crate::{Callback, DesktopPlatform, IconImage, LoginState, SurfaceLevel};
+use crate::{Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SurfaceLevel};
 
 pub struct MacPlatform;
 
@@ -109,6 +111,16 @@ impl DesktopPlatform for MacPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         login::set(enabled)
+    }
+
+    // --- Lot M ---
+
+    fn watch_desktop_drag(&self, on_rect: RectCallback) -> bool {
+        desktop_drag::watch_drag(on_rect)
+    }
+
+    fn set_window_glass(&self, title: &str, enabled: bool, corner_radius: f32) -> bool {
+        glass::set_glass(title, enabled, corner_radius)
     }
 }
 
