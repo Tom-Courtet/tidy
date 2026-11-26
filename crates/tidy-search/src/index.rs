@@ -215,13 +215,37 @@ impl Index {
         }
     }
 
-    /// Met l'index à jour après un changement signalé sur `changed` (créé, supprimé,
-    /// renommé, modifié).
-    pub fn refresh(&mut self, changed: &Path, config: &Config) {
-        let Some(root) = config.root_of(changed) else {
-            return;
-        };
-        let root_path = root.path.clone();
+    /// Met l'index à jour après des changements signalés : un dossier n'est relu
+    /// qu'une fois, quel que soit le nombre de ses éléments changés (copie de nombreux
+    /// fichiers). Rend le nombre de mises à jour faites.
+    pub fn refresh_all(
+        &mut self,
+        changed: impl IntoIterator<Item = PathBuf>,
+        config: &Config,
+    ) -> usize {
+        let mut parents: HashSet<PathBuf> = HashSet::new();
+        let mut done = 0;
+        for path in changed {
+            let Some(root) = self.relevant_root(&path, config) else {
+                continue;
+            };
+            // Relire le dossier parent couvre tous ses éléments changés (une racine
+            // elle-même est toujours traitée).
+            if path != root
+                && let Some(parent) = path.parent()
+                && !parents.insert(parent.to_path_buf())
+            {
+                continue;
+            }
+            self.refresh(&path, config);
+            done += 1;
+        }
+        done
+    }
+
+    /// Racine dont `changed` dépend, s'il est à suivre (ni exclu, ni dans un cache).
+    fn relevant_root(&self, changed: &Path, config: &Config) -> Option<PathBuf> {
+        let root_path = config.root_of(changed)?.path.clone();
         if let Ok(rel) = changed.strip_prefix(&root_path) {
             let excluded = rel.components().any(|c| {
                 c.as_os_str()
@@ -230,9 +254,18 @@ impl Index {
             });
             let in_cache = self.caches.iter().any(|c| changed.starts_with(c));
             if excluded || in_cache || config.exclusions.excludes_path(changed) {
-                return;
+                return None;
             }
         }
+        Some(root_path)
+    }
+
+    /// Met l'index à jour après un changement signalé sur `changed` (créé, supprimé,
+    /// renommé, modifié).
+    pub fn refresh(&mut self, changed: &Path, config: &Config) {
+        let Some(root_path) = self.relevant_root(changed, config) else {
+            return;
+        };
         if changed == root_path {
             if root_path.is_dir() {
                 let never = AtomicBool::new(false);
@@ -442,5 +475,29 @@ pub(crate) mod tests {
         fs::create_dir_all(root.join("Z/node_modules")).unwrap();
         index.refresh(&root.join("Z/node_modules/x.js"), &config);
         assert_eq!(names(&index), ["Z", "Z/deux.txt", "Z/un.txt"]);
+    }
+
+    /// Plusieurs fichiers changés dans un même dossier : il n'est relu qu'une fois.
+    #[test]
+    fn a_folder_is_relisted_once_per_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("A")).unwrap();
+        let config = config_for(root, false);
+        let mut index = Index::scan(&config, &AtomicBool::new(false));
+        let mut changed = Vec::new();
+        for n in ["1.txt", "2.txt", "3.txt"] {
+            fs::write(root.join("A").join(n), "x").unwrap();
+            changed.push(root.join("A").join(n));
+        }
+        fs::create_dir_all(root.join("A/node_modules")).unwrap();
+        changed.push(root.join("A/node_modules/x.js"));
+        fs::write(root.join("B.txt"), "x").unwrap();
+        changed.push(root.join("B.txt"));
+        assert_eq!(index.refresh_all(changed, &config), 2);
+        assert_eq!(
+            names(&index),
+            ["A", "A/1.txt", "A/2.txt", "A/3.txt", "B.txt"]
+        );
     }
 }

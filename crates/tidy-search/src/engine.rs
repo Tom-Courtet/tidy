@@ -381,10 +381,8 @@ fn apply(shared: &Shared, config: &Config, paths: impl Iterator<Item = PathBuf>)
         let Ok(mut index) = shared.index.write() else {
             return;
         };
-        for path in paths {
-            index.refresh(&path, config);
-            count += 1;
-        }
+        // Un dossier relu une fois par lot, même pour de nombreux fichiers changés.
+        count += index.refresh_all(paths, config);
         index.len()
     };
     log::debug!(
