@@ -245,7 +245,9 @@ impl Controller {
                     self.tick();
                 }
                 Ok(Msg::Bus(Event::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {
-                    self.player.stop();
+                    // Comme à l'arrêt d'une vidéo : Windows redessine le vrai fond, sinon
+                    // la dernière image peut rester sur le bureau.
+                    self.stop_video();
                     return;
                 }
                 Ok(Msg::Bus(_)) => {}
