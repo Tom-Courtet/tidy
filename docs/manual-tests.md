@@ -128,6 +128,10 @@ Une liste par partie, à suivre dans cet ordre :
 6. [Widgets : météo, calendrier, chat IA](tests-vague2/I-widgets-reseau.md)
 7. [Fonds d'écran](tests-vague2/J-fonds.md)
 
+### Finition et corrections (27/11)
+8. [Installation, mise à jour, désinstallation, Options](tests-vague3/K-finition.md)
+9. [Corrections de la relecture (jeton, renommage, Maj+Supprimer, icônes perdues…)](tests-vague3/L-corrections.md)
+
 ## macOS
 
 Avec des données jetables :

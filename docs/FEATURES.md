@@ -18,6 +18,9 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | Raccourcis globaux | fait | 1 | éditeur, conflits internes, avertissement pour les raccourcis du système |
 | Assistant de premier lancement (Démarrage rapide / Personnaliser) | fait | 1 | relançable depuis Options |
 | Interrupteur global des boîtes | fait | 0 | menu de la barre des menus, Options |
+| Installation Windows, mise à jour, désinstallation complète | fait | 3 | `tidy --install` (dossier des programmes, menu Démarrer, « Applications et fonctionnalités ») ; `--uninstall` garde les données et le coffre |
+| Instance unique, dialogue entre processus protégé | fait | 3 | verrou `agent.lock`, jeton aléatoire, socket en 0600 |
+| macOS : Tidy.app, .dmg, signature et notarisation documentées | fait | 3 | `tools/bundle_macos.sh`, `tools/dmg_macos.sh`, `docs/distribution.md` |
 
 ## Bureau
 

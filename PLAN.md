@@ -140,6 +140,8 @@ Les lots d'une même vague tournent en parallèle, chacun dans son worktree, sur
 - 🛑 **Validation** : démo du rangement sur une copie de ton bureau (`TIDY_DATA_DIR` et un dossier factice), puis sur le vrai.
 
 ### Vague 2 · Dispositions, boîte privée, recherche, widgets (jalons 4 et 5), 5 lots
+
+**État (26/11/2026)** : faite, avec le lot M (ce qui manquait aux boîtes) et le lot J de la vague 3 en parallèle. Lots fusionnés et vérifiés (fmt, clippy macOS et Windows, tests), essai de bout en bout sous macOS. Essais réels sous Windows à faire (`docs/manual-tests.md`).
 | Lot | Contenu | Où |
 |---|---|---|
 | **E · Dispositions** | Instantanés automatiques à chaque changement (50 au plus ; le premier et les manuels protégés), miniature, restaurer, renommer, supprimer, dispositions nommées avec raccourci, réglage du changement de résolution (redimensionner, mémoriser par résolution, ne rien faire), page Dispositions. | `tidy-core`, `app/manager` |
@@ -150,6 +152,8 @@ Les lots d'une même vague tournent en parallèle, chacun dans son worktree, sur
 - 🛑 **Validation.**
 
 ### Vague 3 · Fonds d'écran et finition (jalons 6 et 7), 3 lots
+
+**État (26/11/2026)** : faite. J (fonds d'écran), K (installation Windows, désinstallation, Options, README, .dmg) et L (relecture : 17 corrections, puis 21 points restants corrigés) fusionnés et vérifiés. Essais réels sous Windows à faire.
 | Lot | Contenu |
 |---|---|
 | **J · Fonds d'écran** | Bibliothèque locale (import de fichiers et de dossiers, catégories, favoris), fonds fixes, vidéo et couleur unie, playlist (ordre ou aléatoire, de 5 min à 24 h), volume (muet par défaut), un fond par écran ou le même partout, ajustement (remplir, ajuster, étirer), pause intelligente, `WallpaperSource` en ligne désactivée par défaut (Bing du jour en exemple). |
