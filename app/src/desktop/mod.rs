@@ -639,6 +639,7 @@ impl Desktop {
                 Event::SettingsChanged => {
                     self.settings = self.store.load();
                     crate::lang::apply(self.settings.language);
+                    self.widgets.settings_changed(&self.settings);
                 }
                 Event::DesktopChanged => {
                     self.state = self.store.load();

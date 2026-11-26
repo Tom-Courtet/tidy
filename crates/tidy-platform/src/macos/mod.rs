@@ -4,6 +4,7 @@ mod desktop_drag;
 mod files;
 mod glass;
 mod login;
+mod notify;
 pub mod reopen;
 mod screens;
 mod watch;
@@ -121,6 +122,12 @@ impl DesktopPlatform for MacPlatform {
 
     fn set_window_glass(&self, title: &str, enabled: bool, corner_radius: f32) -> bool {
         glass::set_glass(title, enabled, corner_radius)
+    }
+
+    // --- Lot H ---
+
+    fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
+        notify::notify(title, body, sound)
     }
 }
 

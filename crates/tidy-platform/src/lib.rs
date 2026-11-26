@@ -174,6 +174,15 @@ pub trait DesktopPlatform: Send + Sync {
     fn set_window_glass(&self, _title: &str, _enabled: bool, _corner_radius: f32) -> bool {
         false
     }
+
+    // --- Vague 2, lot H (widgets). Valeur par défaut : « pas disponible ». ---
+
+    /// Notification native (centre de notifications de Windows ou de macOS), avec ou
+    /// sans son. Ne bloque pas : l'envoi se fait sur un fil à part. `false` : pas
+    /// disponible sur cet OS.
+    fn notify(&self, _title: &str, _body: &str, _sound: bool) -> bool {
+        false
+    }
 }
 
 /// macOS : appelle `on_reopen` quand l'utilisateur rouvre Tidy.app alors qu'il tourne

@@ -20,6 +20,9 @@ mod pages;
 mod quick_actions;
 mod report;
 mod shortcuts;
+/// Page Widgets (lot H). Nommée autrement que `tidy_ui::widgets`, importé ici.
+#[path = "widgets.rs"]
+mod widgets_page;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::mpsc::{self, Receiver};
@@ -351,7 +354,7 @@ impl Manager {
         }
         self.desktop = self.store.load();
         self.desktop_read_at = Instant::now();
-        if matches!(self.page, Page::Boxes | Page::Organization) {
+        if matches!(self.page, Page::Boxes | Page::Organization | Page::Widgets) {
             ctx.request_repaint_after(DESKTOP_EVERY);
         }
     }

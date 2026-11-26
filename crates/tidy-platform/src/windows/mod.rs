@@ -8,10 +8,12 @@
 //! - [`watch`] : changements d'écrans ;
 //! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
 //! - [`glass`] : fond « verre dépoli » des boîtes (lot M).
+//! - [`notify`] : notifications (toasts), lot H.
 
 mod desktop;
 mod glass;
 mod icons;
+mod notify;
 mod registry;
 mod screens;
 mod shell;
@@ -185,6 +187,12 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_window_glass(&self, title: &str, enabled: bool, corner_radius: f32) -> bool {
         glass::set_glass(title, enabled, corner_radius)
+    }
+
+    // --- Lot H ---
+
+    fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
+        notify::notify(title, body, sound)
     }
 }
 

@@ -53,7 +53,7 @@ fn with_key<T>(path: &str, access: u32, create: bool, f: impl FnOnce(HKEY) -> T)
 }
 
 /// Écrit une chaîne (`name` vide : valeur par défaut de la clé).
-fn set_string(path: &str, name: &str, value: &str) -> Result<()> {
+pub(super) fn set_string(path: &str, name: &str, value: &str) -> Result<()> {
     let name_w = wide(name);
     let value_w = wide(value);
     let bytes = u32::try_from(value_w.len() * 2).context("valeur trop longue")?;
