@@ -85,6 +85,9 @@ pub struct BoxView<'a> {
     /// Cible d'un glisser interne en cours.
     pub drop_target: bool,
     pub single_click: bool,
+    /// Le contenu est dessiné par l'appelant (boîte privée verrouillée, lot F) : ni
+    /// éléments ni texte « vide ».
+    pub custom_body: bool,
 }
 
 /// Ce que la boîte rapporte en plus des actions.
@@ -102,6 +105,8 @@ pub struct BoxOutput {
     pub shift: bool,
     /// Grille libre affichée (repère de la fenêtre).
     pub grid: Option<GridGeom>,
+    /// Zone du contenu, sous la barre de titre (absente si enroulée).
+    pub body: Option<Rect>,
 }
 
 /// Bord ou coin sous `p`, s'il y en a un.
@@ -241,9 +246,10 @@ pub fn draw(
     if background.drag_started() {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
-    let empty = v.sections.iter().all(|s| s.items.is_empty());
+    result.body = Some(body);
+    let empty = !v.custom_body && v.sections.iter().all(|s| s.items.is_empty());
     let mut hovered_item = None;
-    if let Some(dir) = v.dir {
+    if let Some(dir) = v.dir.filter(|_| !v.custom_body) {
         let content = body.shrink2(vec2(6.0, 4.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(content));
         child.set_clip_rect(content.intersect(ui.clip_rect()));

@@ -2551,6 +2551,7 @@ dependencies = [
  "tidy-core",
  "tidy-platform",
  "tidy-ui",
+ "tidy-vault",
  "tidy-widgets",
  "tracing",
  "tracing-appender",

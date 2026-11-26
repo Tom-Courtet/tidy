@@ -29,6 +29,7 @@ mod overlay;
 mod portal;
 mod roll;
 mod textures;
+mod vault;
 mod widgets;
 
 use std::collections::{HashMap, HashSet};
@@ -83,6 +84,7 @@ pub fn run(store: Store) -> Result<()> {
         &store,
         move |event| {
             if event == Event::Shutdown {
+                vault::lock_before_exit();
                 std::process::exit(0);
             }
             let _ = tx.send(event);
@@ -92,6 +94,7 @@ pub fn run(store: Store) -> Result<()> {
         },
         move || {
             log::warn!("l'agent a disparu : le bureau rend les icônes et s'arrête");
+            vault::lock_before_exit();
             restore_system_icons(&end_store);
             std::process::exit(0);
         },
@@ -354,6 +357,8 @@ struct Desktop {
     icon_sync: IconSync,
     /// Fenêtres des widgets (lots H et I).
     widgets: widgets::WidgetHost,
+    /// Boîte privée et son coffre (lot F).
+    vault: vault::VaultBox,
 }
 
 impl Desktop {
@@ -380,6 +385,7 @@ impl Desktop {
         };
         let icon_sync = IconSync::new(store.clone());
         let widget_host = widgets::WidgetHost::new(&store);
+        let vault_box = vault::VaultBox::new(&store, &ctx);
         let mut desktop = Self {
             icons: textures::IconCache::new(ctx.clone()),
             store,
@@ -405,6 +411,7 @@ impl Desktop {
             quick_access: false,
             icon_sync,
             widgets: widget_host,
+            vault: vault_box,
         };
         desktop.rescan_desktop();
         desktop.sync_windows();
@@ -593,6 +600,9 @@ impl Desktop {
 
     /// Dossier des éléments d'une boîte : le bureau, ou le dossier affiché du portail.
     fn dir_of(&self, b: BoxId) -> Option<ItemDir> {
+        if let Some(dir) = self.vault_dir(b) {
+            return Some(dir);
+        }
         match self.portals.get(&b) {
             Some(p) => Some(ItemDir::plain(p.current())),
             None => Some(ItemDir {
@@ -642,6 +652,9 @@ impl Desktop {
                     self.save(true);
                 }
                 Event::DesktopFilesChanged => self.desktop_files_changed(),
+                Event::Module { module, action, .. } if module == vault::MODULE => {
+                    self.vault_command(&action);
+                }
                 Event::ScreensChanged { screens } => self.screens_changed(screens),
                 Event::QuickAccess { active } => {
                     self.quick_access = active;
@@ -723,6 +736,7 @@ impl Desktop {
         for portal in self.portals.values_mut() {
             changed |= portal.refresh(&ctx);
         }
+        changed |= self.vault_poll();
         changed
     }
 
@@ -779,6 +793,7 @@ impl Desktop {
             return;
         };
         let entries = match self.portals.get(&id) {
+            _ if matches!(b.kind, BoxKind::Private) => self.vault.entries(b).unwrap_or_default(),
             Some(p) => items::dir_entries(p.items.clone(), b.sort),
             None => b
                 .tabs
@@ -827,7 +842,9 @@ impl Desktop {
             .as_ref()
             .unwrap_or(&settings.default_appearance)
             .icon_size;
-        menu::box_menu(deskbox, page, &others, icon_size)
+        let mut entries = menu::box_menu(deskbox, page, &others, icon_size);
+        vault::adjust_menu(state, deskbox, page, &mut entries);
+        entries
     }
 
     /// Relit le cadre de la fenêtre ; une fois stable, l'aimante puis l'enregistre.
@@ -965,6 +982,10 @@ impl Desktop {
 
     /// Applique une demande de l'utilisateur.
     fn apply(&mut self, action: Action) {
+        // Boîte privée : ses actions passent par le coffre (lot F).
+        let Some(action) = self.vault_intercept(action) else {
+            return;
+        };
         let platform = tidy_platform::current();
         match action {
             Action::Open { b, names } => {
@@ -1269,6 +1290,7 @@ impl Desktop {
             Action::DismissUnassigned => {
                 self.overlay.dismiss_unassigned(self.state.unassigned.len());
             }
+            Action::Vault(a) => self.vault_action(a),
         }
         self.generation += 1;
     }
@@ -1666,11 +1688,18 @@ impl eframe::App for Desktop {
                 drop_target: drop_target == Some(id)
                     && self.drag.as_ref().is_some_and(|d| d.from != id),
                 single_click,
+                custom_body: false,
             };
             let icons = &mut self.icons;
             let box_ui = &mut win.ui;
+            let private = matches!(b.kind, BoxKind::Private);
+            let (vault_box, vault_settings) = (&mut self.vault, &self.settings.vault);
             let (res, outer) = ctx.show_viewport_immediate(viewport, builder, |ui, _class| {
-                let res = boxwin::draw(ui, &view, box_ui, icons, &mut out);
+                let res = if private {
+                    vault_box.draw(ui, &view, box_ui, icons, &mut out, vault_settings)
+                } else {
+                    boxwin::draw(ui, &view, box_ui, icons, &mut out)
+                };
                 (res, ui.ctx().input(|i| i.viewport().outer_rect))
             });
             drop(view);
@@ -1759,6 +1788,7 @@ impl eframe::App for Desktop {
             &mut out,
         );
         self.overlay.show_draw_offer(&ctx, &self.screens, &mut out);
+        self.vault_dialog(&ctx);
 
         for action in out {
             self.apply(action);

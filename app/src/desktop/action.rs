@@ -162,4 +162,7 @@ pub enum Action {
     // --- Bandeau des non affectées ---
     ApplyRules,
     DismissUnassigned,
+
+    // --- Lot F : boîte privée (voir `super::vault`) ---
+    Vault(super::vault::VaultAction),
 }

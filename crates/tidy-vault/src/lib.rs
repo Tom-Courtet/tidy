@@ -97,8 +97,14 @@ pub enum VaultError {
     BadName(String),
     /// Nom déjà pris dans le coffre.
     NameTaken(String),
-    /// Élément non pris en charge (lien symbolique…).
+    /// Élément non pris en charge (fichier trop gros, coffre d'une version plus
+    /// récente).
     Unsupported(String),
+    /// Lien symbolique (ou dossier qui en contient) : refusé, l'original reste.
+    Symlink,
+    /// Des copies ouvertes n'ont pas pu être effacées (fichier encore ouvert par une
+    /// appli) : le coffre, vidé, n'est pas supprimé.
+    StillOpen,
     /// L'original n'a pas pu aller à la corbeille : rien n'a changé.
     Disposal(String),
     Random(String),
@@ -134,6 +140,8 @@ impl fmt::Display for VaultError {
             Self::BadName(name) => write!(f, "nom refusé : « {name} »"),
             Self::NameTaken(name) => write!(f, "« {name} » existe déjà dans le coffre"),
             Self::Unsupported(what) => write!(f, "non pris en charge : {what}"),
+            Self::Symlink => f.write_str("les liens symboliques ne sont pas pris en charge"),
+            Self::StillOpen => f.write_str("des fichiers du coffre sont encore ouverts"),
             Self::Disposal(e) => write!(f, "corbeille impossible : {e}"),
             Self::Random(e) => write!(f, "aléa du système indisponible : {e}"),
             Self::Io { context, error } => write!(f, "{context} : {error}"),

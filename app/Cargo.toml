@@ -34,6 +34,8 @@ notify.workspace = true
 jiff.workspace = true
 # Choix d'un dossier (portails de dossier, fenêtre principale).
 rfd.workspace = true
+# Boîte privée : coffre chiffré (lot F).
+tidy-vault.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -19,6 +19,7 @@ mod pages;
 mod quick_actions;
 mod report;
 mod shortcuts;
+mod vault;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::mpsc::{self, Receiver};

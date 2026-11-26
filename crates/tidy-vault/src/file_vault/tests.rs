@@ -453,7 +453,7 @@ fn symlinks_are_refused() {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(matches!(
             v.add(&link, &mut b.dispose()),
-            Err(VaultError::Unsupported(_))
+            Err(VaultError::Symlink)
         ));
         assert!(link.exists());
         let dir = b.desktop.join("D");

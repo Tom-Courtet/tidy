@@ -684,9 +684,7 @@ impl FileVault {
         if meta.is_dir() {
             let found = fsx::walk(source).map_err(VaultError::io("lecture du dossier"))?;
             if found.iter().any(|f| f.is_symlink) {
-                return Err(VaultError::Unsupported(
-                    "un dossier qui contient des liens symboliques".into(),
-                ));
+                return Err(VaultError::Symlink);
             }
             entries.push(Entry {
                 path: name.to_owned(),
@@ -865,7 +863,7 @@ impl VaultBackend for FileVault {
         let key = self.key()?;
         let meta = fs::symlink_metadata(source).map_err(VaultError::io("lecture du fichier"))?;
         if meta.file_type().is_symlink() {
-            return Err(VaultError::Unsupported("un lien symbolique".into()));
+            return Err(VaultError::Symlink);
         }
         let base = source
             .file_name()
@@ -1061,9 +1059,7 @@ impl VaultBackend for FileVault {
         let report = self.lock();
         if !report.kept.is_empty() || self.has_leftovers() {
             // Des copies en clair restent (fichier encore ouvert) : on garde le dossier.
-            return Err(VaultError::Unsupported(
-                "des fichiers du coffre sont encore ouverts ; fermez-les puis recommencez".into(),
-            ));
+            return Err(VaultError::StillOpen);
         }
         // Le coffre est vide : seuls restent ses propres fichiers.
         let _ = fs::remove_dir_all(self.root.join(OBJECTS));
