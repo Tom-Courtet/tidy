@@ -27,6 +27,10 @@ const MAX_CRASHES: usize = 3;
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 /// Fréquence de vérification du processus.
 const POLL: Duration = Duration::from_millis(500);
+/// À l'arrêt de l'agent, délai laissé au bureau pour finir de lui-même (il reçoit
+/// `Event::Shutdown` et verrouille la boîte privée : rechiffrement des fichiers ouverts
+/// modifiés, effacement des copies en clair ; jusqu'à 10 s) avant d'être tué.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(11);
 
 pub enum Command {
     /// Appliquer un mode (démarrage, changement de réglage).
@@ -67,7 +71,7 @@ impl Supervisor {
     pub fn shutdown(&self) {
         let (tx, rx) = mpsc::channel();
         self.send(Command::Shutdown(tx));
-        let _ = rx.recv_timeout(Duration::from_secs(10));
+        let _ = rx.recv_timeout(SHUTDOWN_GRACE + Duration::from_secs(4));
     }
 }
 
@@ -105,6 +109,10 @@ impl Worker {
                     }
                 }
                 Ok(Command::Shutdown(ack)) => {
+                    // `Event::Shutdown` est déjà parti : le bureau verrouille le coffre
+                    // puis s'arrête de lui-même. Le tuer tout de suite laisserait les
+                    // copies en clair des fichiers ouverts sur le disque.
+                    self.wait_child(SHUTDOWN_GRACE);
                     self.stop_child();
                     self.restore_finder();
                     let _ = ack.send(());
@@ -163,6 +171,21 @@ impl Worker {
             }
             Err(e) => log::error!("lancement du bureau impossible : {e}"),
         }
+    }
+
+    /// Attend au plus `limit` que le bureau s'arrête de lui-même.
+    fn wait_child(&mut self, limit: Duration) {
+        let Some(child) = &mut self.child else {
+            return;
+        };
+        let start = Instant::now();
+        while start.elapsed() < limit {
+            match child.try_wait() {
+                Ok(None) => thread::sleep(Duration::from_millis(50)),
+                Ok(Some(_)) | Err(_) => return,
+            }
+        }
+        log::warn!("le bureau ne s'est pas arrêté de lui-même : arrêt forcé");
     }
 
     fn stop_child(&mut self) {
