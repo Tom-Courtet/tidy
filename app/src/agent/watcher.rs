@@ -28,8 +28,8 @@ use tidy_core::events::{Event, EventBus};
 use tidy_core::model::{BoxKind, ItemRef};
 use tidy_core::organize;
 use tidy_core::rules::MatcherRegistry;
-use tidy_core::scan::{DesktopEntry, is_transient_name, scan_entries};
-use tidy_core::store::desktop_dir;
+use tidy_core::scan::{DesktopEntry, is_transient_name, scan_desktop};
+use tidy_core::store::desktop_dirs;
 use tidy_core::{DesktopCommand, DesktopState, Settings, Store};
 
 use super::organizer;
@@ -41,14 +41,15 @@ const MAX_BATCH: Duration = Duration::from_secs(3);
 
 /// Lance la surveillance sur son propre fil.
 pub fn spawn(store: Store, bus: EventBus) {
-    let Some(dir) = desktop_dir() else {
+    let dirs = desktop_dirs();
+    if dirs.is_empty() {
         log::warn!("surveillance du bureau : dossier du bureau introuvable");
         return;
-    };
+    }
     let spawned = std::thread::Builder::new()
         .name("surveillance-bureau".into())
         .spawn(move || {
-            if let Err(e) = run(&store, &bus, &dir) {
+            if let Err(e) = run(&store, &bus, &dirs) {
                 log::error!("surveillance du bureau arrêtée : {e:#}");
             }
         });
@@ -57,7 +58,9 @@ pub fn spawn(store: Store, bus: EventBus) {
     }
 }
 
-fn run(store: &Store, bus: &EventBus, dir: &Path) -> Result<()> {
+/// `dirs` : le bureau de l'utilisateur, puis le bureau public (facultatif).
+fn run(store: &Store, bus: &EventBus, dirs: &[PathBuf]) -> Result<()> {
+    let dir = &dirs[0];
     let (tx, rx) = mpsc::channel();
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = tx.send(res);
@@ -67,8 +70,14 @@ fn run(store: &Store, bus: &EventBus, dir: &Path) -> Result<()> {
         .watch(dir, RecursiveMode::NonRecursive)
         .with_context(|| format!("surveillance de {}", dir.display()))?;
     log::info!("surveillance du bureau : {}", dir.display());
+    for extra in &dirs[1..] {
+        match watcher.watch(extra, RecursiveMode::NonRecursive) {
+            Ok(()) => log::info!("surveillance du bureau public : {}", extra.display()),
+            Err(e) => log::warn!("surveillance de {} : {e}", extra.display()),
+        }
+    }
 
-    let mut known = scan_entries(dir).with_context(|| format!("lecture de {}", dir.display()))?;
+    let mut known = scan_desktop(dirs).with_context(|| format!("lecture de {}", dir.display()))?;
     catch_up(store, bus, &known);
 
     loop {
@@ -93,7 +102,7 @@ fn run(store: &Store, bus: &EventBus, dir: &Path) -> Result<()> {
                 None
             }
         }));
-        let current = match scan_entries(dir) {
+        let current = match scan_desktop(dirs) {
             Ok(current) => current,
             Err(e) => {
                 log::warn!("lecture de {} impossible : {e}", dir.display());

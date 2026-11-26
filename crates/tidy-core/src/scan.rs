@@ -14,7 +14,7 @@
 //! Seuls les premiers Ko de ces fichiers sont lus ; rien n'est jamais écrit.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
 
@@ -64,6 +64,37 @@ pub fn scan_entries(dir: &Path) -> std::io::Result<Vec<DesktopEntry>> {
     }
     items.sort_by_key(|e| e.info.name.to_lowercase());
     Ok(items)
+}
+
+/// Éléments de plusieurs dossiers montrés ensemble sur le bureau (celui de
+/// l'utilisateur, puis le bureau public : [`crate::store::desktop_dirs`]), avec
+/// l'indice du dossier de chacun. Le premier dossier doit être lisible ; les suivants
+/// sont facultatifs. Nom en double : le premier dossier l'emporte (les éléments sont
+/// désignés par leur nom).
+pub fn scan_desktop_located(dirs: &[PathBuf]) -> std::io::Result<Vec<(DesktopEntry, usize)>> {
+    let mut out: Vec<(DesktopEntry, usize)> = Vec::new();
+    for (i, dir) in dirs.iter().enumerate() {
+        let entries = match scan_entries(dir) {
+            Ok(entries) => entries,
+            Err(e) if i == 0 => return Err(e),
+            Err(_) => continue,
+        };
+        for entry in entries {
+            if !out.iter().any(|(e, _)| e.info.name == entry.info.name) {
+                out.push((entry, i));
+            }
+        }
+    }
+    out.sort_by_key(|(e, _)| e.info.name.to_lowercase());
+    Ok(out)
+}
+
+/// Comme [`scan_desktop_located`], sans l'indice du dossier.
+pub fn scan_desktop(dirs: &[PathBuf]) -> std::io::Result<Vec<DesktopEntry>> {
+    Ok(scan_desktop_located(dirs)?
+        .into_iter()
+        .map(|(e, _)| e)
+        .collect())
 }
 
 /// Lit un élément du bureau. `None` : élément caché, système ou disparu.
@@ -622,5 +653,43 @@ mod tests {
         assert!(is_transient_name("~$Rapport.docx"));
         assert!(!is_transient_name("Rapport.docx"));
         assert!(!is_transient_name("partie"));
+    }
+
+    #[test]
+    fn public_desktop_items_are_merged() {
+        let user = tempfile::tempdir().unwrap();
+        let public = tempfile::tempdir().unwrap();
+        std::fs::write(user.path().join("b.txt"), "b").unwrap();
+        std::fs::write(user.path().join("Même.txt"), "u").unwrap();
+        std::fs::write(public.path().join("Chrome.lnk"), "x").unwrap();
+        std::fs::write(public.path().join("Même.txt"), "p").unwrap();
+        let dirs = [
+            user.path().to_path_buf(),
+            public.path().to_path_buf(),
+            PathBuf::from("/dossier/absent"),
+        ];
+        let found: Vec<(String, usize)> = scan_desktop_located(&dirs)
+            .unwrap()
+            .into_iter()
+            .map(|(e, i)| (e.info.name, i))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                ("b.txt".into(), 0),
+                ("Chrome.lnk".into(), 1),
+                ("Même.txt".into(), 0)
+            ]
+        );
+        assert_eq!(
+            crate::store::resolve_desktop_item(&dirs, "Chrome.lnk"),
+            Some(public.path().join("Chrome.lnk"))
+        );
+        assert_eq!(
+            crate::store::resolve_desktop_item(&dirs, "Même.txt"),
+            Some(user.path().join("Même.txt"))
+        );
+        // Le bureau de l'utilisateur doit être lisible.
+        assert!(scan_desktop(&[PathBuf::from("/dossier/absent")]).is_err());
     }
 }

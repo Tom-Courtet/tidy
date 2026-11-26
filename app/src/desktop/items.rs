@@ -2,8 +2,9 @@
 //! en liste (icône système ou repli, libellé coupé proprement, sélection, ouverture,
 //! renommage, glisser).
 
-use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
@@ -49,6 +50,38 @@ pub fn dir_entries(mut items: Vec<ItemInfo>, sort: SortOrder) -> Vec<ItemInfo> {
         sort_items(&mut items, sort);
     }
     items
+}
+
+/// Dossier des éléments d'une boîte : le bureau (avec le bureau public de Windows,
+/// dont l'Explorateur mêle les éléments à ceux de l'utilisateur) ou le dossier affiché
+/// par un portail.
+#[derive(Debug, Clone)]
+pub struct ItemDir {
+    pub main: PathBuf,
+    /// Bureau public et noms des éléments qui en viennent.
+    pub public: Option<(PathBuf, Arc<HashSet<String>>)>,
+}
+
+impl ItemDir {
+    pub fn plain(main: PathBuf) -> Self {
+        Self { main, public: None }
+    }
+
+    /// Chemin de l'élément `name`.
+    pub fn join(&self, name: &str) -> PathBuf {
+        match &self.public {
+            Some((dir, names)) if names.contains(name) => dir.join(name),
+            _ => self.main.join(name),
+        }
+    }
+
+    /// Dossier qui contient l'élément `name`.
+    pub fn parent_of(&self, name: &str) -> &Path {
+        match &self.public {
+            Some((dir, names)) if names.contains(name) => dir,
+            _ => &self.main,
+        }
+    }
 }
 
 /// Une section affichée : un groupe de dates (ou aucun) et ses éléments.
@@ -234,7 +267,7 @@ pub struct ItemsView<'a> {
     pub view: ViewMode,
     pub look: &'a Appearance,
     /// Dossier des éléments (bureau ou dossier du portail).
-    pub dir: &'a Path,
+    pub dir: &'a ItemDir,
     pub single_click: bool,
     /// Le dossier affiché est celui d'un portail (double-clic sur un dossier : entrer).
     pub portal: bool,

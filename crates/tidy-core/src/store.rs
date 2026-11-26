@@ -158,6 +158,39 @@ pub fn desktop_dir() -> Option<PathBuf> {
     directories::UserDirs::new().and_then(|d| d.desktop_dir().map(Path::to_path_buf))
 }
 
+/// Bureau public de Windows (`C:\Users\Public\Desktop`) : l'Explorateur montre ses
+/// éléments (souvent les raccourcis posés par les installateurs) avec ceux de
+/// l'utilisateur. `TIDY_PUBLIC_DESKTOP_DIR` le remplace (essais) ; avec un faux bureau
+/// (`TIDY_DESKTOP_DIR`) et sans cette variable : aucun.
+pub fn public_desktop_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("TIDY_PUBLIC_DESKTOP_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if !cfg!(windows) || std::env::var_os("TIDY_DESKTOP_DIR").is_some() {
+        return None;
+    }
+    let dir = PathBuf::from(std::env::var_os("PUBLIC")?).join("Desktop");
+    dir.is_dir().then_some(dir)
+}
+
+/// Dossiers dont les éléments s'affichent sur le bureau : celui de l'utilisateur
+/// d'abord, puis le bureau public s'il existe.
+pub fn desktop_dirs() -> Vec<PathBuf> {
+    desktop_dir()
+        .into_iter()
+        .chain(public_desktop_dir())
+        .collect()
+}
+
+/// Chemin d'un élément du bureau désigné par son nom : dans le premier dossier qui le
+/// contient, sinon dans le premier dossier.
+pub fn resolve_desktop_item(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    dirs.iter()
+        .map(|d| d.join(name))
+        .find(|p| p.symlink_metadata().is_ok())
+        .or_else(|| dirs.first().map(|d| d.join(name)))
+}
+
 /// Écrit `bytes` dans `path` via un fichier temporaire du même dossier, synchronisé
 /// puis renommé.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {

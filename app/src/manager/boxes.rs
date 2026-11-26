@@ -123,7 +123,10 @@ fn add_portal(m: &mut Manager) {
     else {
         return;
     };
-    if tidy_core::store::desktop_dir().is_some_and(|desktop| is_on_desktop(&path, &desktop)) {
+    if tidy_core::store::desktop_dirs()
+        .iter()
+        .any(|desktop| is_on_desktop(&path, desktop))
+    {
         m.error = Some(t!("boxes_page.portal_on_desktop").to_owned());
         return;
     }

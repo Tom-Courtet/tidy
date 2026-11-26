@@ -5,7 +5,6 @@
 //! déplace et redimensionne la fenêtre lui-même (`StartDrag`, `BeginResize`), ce qui
 //! reste fluide même quand l'interface ne se redessine pas.
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use egui::viewport::ResizeDirection;
@@ -17,7 +16,7 @@ use tidy_core::model::{Appearance, DeskBox, Rgba, TitleVisibility};
 use tidy_ui::{icons, t, theme, widgets};
 
 use super::action::Action;
-use super::items::{self, ItemsState, ItemsView, Section};
+use super::items::{self, ItemDir, ItemsState, ItemsView, Section};
 use super::textures::IconCache;
 
 /// Hauteur de la barre de titre.
@@ -79,7 +78,7 @@ pub struct BoxView<'a> {
     pub look: &'a Appearance,
     pub sections: &'a [Section],
     /// Dossier des éléments ; `None` : bureau introuvable.
-    pub dir: Option<&'a Path>,
+    pub dir: Option<&'a ItemDir>,
     pub portal: Option<PortalView>,
     /// Affichée enroulée (choix de l'utilisateur ou enroulement automatique).
     pub rolled: bool,
