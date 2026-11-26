@@ -9,6 +9,7 @@
 //! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
 //! - [`glass`] : fond « verre dépoli » des boîtes (lot M).
 //! - [`notify`] : notifications (toasts), lot H.
+//! - [`session`] : verrouillage de la session, veille, inactivité (lot F).
 
 mod desktop;
 mod glass;
@@ -16,6 +17,7 @@ mod icons;
 mod notify;
 mod registry;
 mod screens;
+mod session;
 mod shell;
 mod watch;
 mod window;
@@ -35,7 +37,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::BOOL;
 
-use crate::{Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SurfaceLevel};
+use crate::{
+    Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SessionCallback, SurfaceLevel,
+};
 
 pub struct WindowsPlatform;
 
@@ -193,6 +197,16 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
         notify::notify(title, body, sound)
+    }
+
+    // --- Lot F (boîte privée). ---
+
+    fn watch_session(&self, on_event: SessionCallback) -> bool {
+        session::watch_session(on_event)
+    }
+
+    fn idle_seconds(&self) -> Option<f64> {
+        session::idle_seconds()
     }
 }
 

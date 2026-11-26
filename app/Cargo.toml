@@ -36,6 +36,8 @@ jiff.workspace = true
 rfd.workspace = true
 # Identifiants des widgets et des notes (lot H).
 uuid.workspace = true
+# Boîte privée : coffre chiffré (lot F).
+tidy-vault.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -7,6 +7,7 @@ mod login;
 mod notify;
 pub mod reopen;
 mod screens;
+mod session;
 mod watch;
 mod window;
 
@@ -19,7 +20,9 @@ use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::screen::Screen;
 
-use crate::{Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SurfaceLevel};
+use crate::{
+    Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SessionCallback, SurfaceLevel,
+};
 
 pub struct MacPlatform;
 
@@ -128,6 +131,16 @@ impl DesktopPlatform for MacPlatform {
 
     fn notify(&self, title: &str, body: &str, sound: bool) -> bool {
         notify::notify(title, body, sound)
+    }
+
+    // --- Lot F (boîte privée). ---
+
+    fn watch_session(&self, on_event: SessionCallback) -> bool {
+        session::watch_session(on_event)
+    }
+
+    fn idle_seconds(&self) -> Option<f64> {
+        session::idle_seconds()
     }
 }
 

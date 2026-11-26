@@ -62,7 +62,7 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | Portail de dossier | fait | 1 | en direct, sous-dossiers, fil d'Ariane ; tout dossier sauf le bureau lui-même (l'original refuse aussi les dossiers du bureau) |
 | Icônes rangées masquées du bureau système | partiel | 1 | Windows (ADR 012) ; macOS : non |
 | Bureau public de Windows (`C:\Users\Public\Desktop`) | fait | 1 | ses éléments sont rangés comme les autres (26/11) |
-| Boîte privée chiffrée | à faire | 2 | ADR 006 |
+| Boîte privée chiffrée | fait | 2 | ADR 013 (remplace l'ADR 006) : chiffrement fichier par fichier, même coffre sous Windows et macOS ; clé de récupération à la place du courriel ; verrouillage auto (inactivité, veille, session), opacité jusqu'à 0 % ; essais Windows : `docs/tests-vague2/F-coffre.md` |
 
 ## Dispositions, recherche, widgets, fonds d'écran
 

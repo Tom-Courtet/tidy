@@ -111,6 +111,8 @@ pub fn show(m: &mut Manager, ui: &mut egui::Ui) {
             m.save_later();
         }
     });
+
+    super::vault::show(m, ui);
 }
 
 fn add_box(m: &mut Manager) {

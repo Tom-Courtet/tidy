@@ -195,4 +195,6 @@ pub enum Action {
     BoxSettings {
         b: BoxId,
     },
+    // --- Lot F : boîte privée (voir `super::vault`) ---
+    Vault(super::vault::VaultAction),
 }
