@@ -59,9 +59,9 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | Onglets (fusionner, détacher, renommer) | fait | 1 | |
 | Aimantation (bords, autres boîtes, 10 px, Maj) | fait | 1 | |
 | Accès rapide (maintenir / bascule), raccourci par boîte | fait | 1 | à essayer sous Windows (premier plan) |
-| Portail de dossier | fait | 1 | en direct, sous-dossiers, fil d'Ariane ; refusé pour un dossier du bureau |
+| Portail de dossier | fait | 1 | en direct, sous-dossiers, fil d'Ariane ; tout dossier sauf le bureau lui-même (l'original refuse aussi les dossiers du bureau) |
 | Icônes rangées masquées du bureau système | partiel | 1 | Windows (ADR 012) ; macOS : non |
-| Bureau public de Windows (`C:\Users\Public\Desktop`) | à faire | 2 | |
+| Bureau public de Windows (`C:\Users\Public\Desktop`) | fait | 1 | ses éléments sont rangés comme les autres (26/11) |
 | Boîte privée chiffrée | à faire | 2 | ADR 006 |
 
 ## Dispositions, recherche, widgets, fonds d'écran

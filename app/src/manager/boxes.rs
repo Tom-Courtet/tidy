@@ -27,10 +27,9 @@ pub fn display_name(name: &str) -> String {
 
 /// `path` est-il le dossier du bureau ou un dossier qu'il contient ? Un portail ne peut
 /// pas montrer le bureau lui-même.
-pub fn is_on_desktop(path: &Path, desktop: &Path) -> bool {
+pub fn is_desktop_itself(path: &Path, desktop: &Path) -> bool {
     let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    let (path, desktop) = (canonical(path), canonical(desktop));
-    path.starts_with(&desktop)
+    canonical(path) == canonical(desktop)
 }
 
 pub fn show(m: &mut Manager, ui: &mut egui::Ui) {
@@ -125,7 +124,7 @@ fn add_portal(m: &mut Manager) {
     };
     if tidy_core::store::desktop_dirs()
         .iter()
-        .any(|desktop| is_on_desktop(&path, desktop))
+        .any(|desktop| is_desktop_itself(&path, desktop))
     {
         m.error = Some(t!("boxes_page.portal_on_desktop").to_owned());
         return;
@@ -348,7 +347,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_folders_cannot_be_portals() {
+    fn only_the_desktop_itself_cannot_be_a_portal() {
         let dir = tempfile::tempdir().unwrap();
         let desktop = dir.path().join("Bureau");
         let inside = desktop.join("Projets");
@@ -356,15 +355,12 @@ mod tests {
         for d in [&inside, &outside] {
             std::fs::create_dir_all(d).unwrap();
         }
-        assert!(is_on_desktop(&desktop, &desktop));
-        assert!(is_on_desktop(&inside, &desktop));
-        assert!(!is_on_desktop(&outside, &desktop));
+        assert!(is_desktop_itself(&desktop, &desktop));
         // Même désigné par un détour.
-        assert!(is_on_desktop(&desktop.join("Projets/../Projets"), &desktop));
-        // « Bureau 2 » n'est pas dans « Bureau ».
-        let neighbour = dir.path().join("Bureau 2");
-        std::fs::create_dir_all(&neighbour).unwrap();
-        assert!(!is_on_desktop(&neighbour, &desktop));
+        assert!(is_desktop_itself(&inside.join(".."), &desktop));
+        // Un dossier du bureau, ou d'ailleurs, peut devenir un portail.
+        assert!(!is_desktop_itself(&inside, &desktop));
+        assert!(!is_desktop_itself(&outside, &desktop));
     }
 
     #[test]

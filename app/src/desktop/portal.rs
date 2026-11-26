@@ -54,20 +54,21 @@ impl DirWatcher {
 /// Pourquoi un dossier ne peut pas devenir un portail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortalRefusal {
-    /// Le bureau lui-même ou un dossier qu'il contient (message de l'original).
+    /// Le bureau lui-même : ses éléments se rangent dans les boîtes. (L'original
+    /// refuse aussi les dossiers du bureau ; Tidy les accepte.)
     OnDesktop,
     NotAFolder,
 }
 
-/// Vérifie qu'un dossier peut devenir un portail : pas le bureau, ni un dossier du
-/// bureau. Les chemins sont comparés une fois résolus (liens, `..`).
+/// Vérifie qu'un dossier peut devenir un portail : tout dossier sauf le bureau
+/// lui-même. Les chemins sont comparés une fois résolus (liens, `..`).
 pub fn check_folder(path: &Path, desktop: Option<&Path>) -> Result<(), PortalRefusal> {
     if !path.is_dir() {
         return Err(PortalRefusal::NotAFolder);
     }
     let resolve = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     if let Some(desktop) = desktop
-        && resolve(path).starts_with(resolve(desktop))
+        && resolve(path) == resolve(desktop)
     {
         return Err(PortalRefusal::OnDesktop);
     }
@@ -193,7 +194,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_folders_are_refused() {
+    fn only_the_desktop_itself_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let desktop = dir.path().join("Bureau");
         let inside = desktop.join("Projets");
@@ -204,10 +205,8 @@ mod tests {
             check_folder(&desktop, Some(&desktop)),
             Err(PortalRefusal::OnDesktop)
         );
-        assert_eq!(
-            check_folder(&inside, Some(&desktop)),
-            Err(PortalRefusal::OnDesktop)
-        );
+        // Un dossier du bureau peut devenir un portail.
+        assert_eq!(check_folder(&inside, Some(&desktop)), Ok(()));
         // Par un détour (`..`) aussi.
         let detour = elsewhere.join("..").join("Bureau");
         assert_eq!(
