@@ -34,6 +34,8 @@ notify.workspace = true
 jiff.workspace = true
 # Choix d'un dossier (portails de dossier, fenêtre principale).
 rfd.workspace = true
+# Identifiants des widgets et des notes (lot H).
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
