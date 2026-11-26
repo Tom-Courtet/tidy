@@ -118,6 +118,16 @@ Les boîtes montrent alors ce dossier (les icônes de l'Explorateur ne sont pas 
 - [ ] Rétrécir la boîte puis l'élargir : les icônes reprennent leurs cases.
 - [ ] Menu ☰ > Trier > « Supprimer les cases vides » : les icônes se suivent à nouveau. Trier par nom ignore les cases ; revenir à « Ordre manuel » les retrouve.
 
+### Vague 2 et fonds d'écran (27/11)
+Une liste par partie, à suivre dans cet ordre :
+1. [Boîtes : menu, recherche, gel, règles, verre](tests-vague2/M-boites.md)
+2. [Dispositions et instantanés](tests-vague2/E-dispositions.md)
+3. [Boîte privée](tests-vague2/F-coffre.md)
+4. [Recherche rapide](tests-vague2/G-recherche.md)
+5. [Widgets : horloge, notes, pomodoro, outils](tests-vague2/H-widgets.md)
+6. [Widgets : météo, calendrier, chat IA](tests-vague2/I-widgets-reseau.md)
+7. [Fonds d'écran](tests-vague2/J-fonds.md)
+
 ## macOS
 
 Avec des données jetables :
