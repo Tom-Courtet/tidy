@@ -98,6 +98,9 @@ pub struct CalendarSettings {
     pub agenda_days: u8,
     /// Rappel, en minutes avant le début (0 : aucun).
     pub reminder_minutes: u32,
+    /// Rappels déjà envoyés (`uid@début`), gardés pour ne pas les renvoyer après une
+    /// relance du bureau ; les plus anciens sont oubliés.
+    pub reminded: Vec<String>,
 }
 
 impl Default for CalendarSettings {
@@ -107,6 +110,7 @@ impl Default for CalendarSettings {
             view: View::Month,
             agenda_days: 7,
             reminder_minutes: 10,
+            reminded: Vec::new(),
         }
     }
 }
@@ -164,13 +168,28 @@ struct Item {
     occ: Occurrence,
 }
 
-/// Occurrences calculées pour une fenêtre, gardées tant que rien ne change.
+/// Occurrences calculées pour une fenêtre, gardées tant que rien ne change (partagées,
+/// pas recopiées à chaque image).
 struct Cache {
     from: Timestamp,
     to: Timestamp,
     version: u64,
-    items: Vec<Item>,
+    items: Arc<[Item]>,
 }
+
+/// Fenêtres de temps gardées en cache.
+#[derive(Clone, Copy)]
+enum Window {
+    /// Ce que montre la vue (grille du mois, agenda).
+    View,
+    /// Prochaines 25 heures (rappels).
+    Soon,
+    /// Jour choisi hors de la grille du mois affiché.
+    Day,
+}
+
+/// Rappels déjà envoyés gardés au plus (les plus anciens partent).
+const REMINDED_MAX: usize = 200;
 
 /// Formulaire d'ajout d'un agenda.
 #[derive(Default)]
@@ -192,8 +211,8 @@ pub struct CalendarWidget {
     /// Mois affiché (premier jour) et jour choisi.
     month: Option<Date>,
     selected: Option<Date>,
-    view_cache: Option<Cache>,
-    soon_cache: Option<Cache>,
+    /// Une par [`Window`].
+    caches: [Option<Cache>; 3],
     /// Rappels déjà envoyés (`uid` + début).
     notified: HashSet<String>,
     new: NewCalendar,
@@ -215,6 +234,7 @@ pub fn create(settings: &serde_json::Value) -> Box<dyn Widget> {
 impl CalendarWidget {
     fn new(s: CalendarSettings, factory: ProviderFactory, secrets: SecretFactory) -> Self {
         Self {
+            notified: s.reminded.iter().cloned().collect(),
             s,
             factory,
             secrets,
@@ -223,9 +243,7 @@ impl CalendarWidget {
             tz: None,
             month: None,
             selected: None,
-            view_cache: None,
-            soon_cache: None,
-            notified: HashSet::new(),
+            caches: [None, None, None],
             new: NewCalendar::default(),
         }
     }
@@ -345,45 +363,35 @@ impl CalendarWidget {
     }
 
     /// Occurrences d'une fenêtre, recalculées seulement si elle ou les données changent.
-    fn cached(&mut self, soon: bool, from: Timestamp, to: Timestamp) -> Vec<Item> {
+    fn cached(&mut self, window: Window, from: Timestamp, to: Timestamp) -> Arc<[Item]> {
         let tz = self.tz();
         let version = self.version;
-        let slot = if soon {
-            &self.soon_cache
-        } else {
-            &self.view_cache
-        };
-        if let Some(c) = slot
+        if let Some(c) = &self.caches[window as usize]
             && c.from == from
             && c.to == to
             && c.version == version
         {
-            return c.items.clone();
+            return Arc::clone(&c.items);
         }
-        let items = self.collect(from, to, &tz);
-        let cache = Some(Cache {
+        let items: Arc<[Item]> = self.collect(from, to, &tz).into();
+        self.caches[window as usize] = Some(Cache {
             from,
             to,
             version,
-            items: items.clone(),
+            items: Arc::clone(&items),
         });
-        if soon {
-            self.soon_cache = cache;
-        } else {
-            self.view_cache = cache;
-        }
         items
     }
 
     /// Occurrences des prochaines 25 heures (rappels), à la minute près.
-    fn soon(&mut self) -> Vec<Item> {
+    fn soon(&mut self) -> Arc<[Item]> {
         let now = Timestamp::now();
         let minute =
             Timestamp::from_second(now.as_second() - now.as_second().rem_euclid(60)).unwrap_or(now);
         let to = minute
             .checked_add(Duration::from_secs(25 * 3600))
             .unwrap_or(minute);
-        self.cached(true, minute, to)
+        self.cached(Window::Soon, minute, to)
     }
 
     fn color(&self, calendar: usize) -> Color32 {
@@ -400,6 +408,7 @@ impl CalendarWidget {
         let soon = self.soon();
         let now = Timestamp::now();
         let tz = self.tz();
+        let mut sent = false;
         for (key, item) in due_reminders(&soon, now, self.s.reminder_minutes, &self.notified, &tz) {
             let start = item
                 .occ
@@ -425,7 +434,14 @@ impl CalendarWidget {
                 },
                 body,
             });
-            self.notified.insert(key);
+            self.notified.insert(key.clone());
+            self.s.reminded.push(key);
+            sent = true;
+        }
+        if sent {
+            // Noté dans les réglages : pas de doublon après une relance du bureau.
+            prune_reminded(&mut self.s.reminded, now);
+            cx.changed = true;
         }
     }
 
@@ -472,7 +488,7 @@ impl CalendarWidget {
         let first = month.checked_sub(back.days()).unwrap_or(month);
         let last = first.checked_add(42.days()).unwrap_or(first);
         let tz = self.tz();
-        let items = self.cached(false, day_start(first, &tz), day_start(last, &tz));
+        let items = self.cached(Window::View, day_start(first, &tz), day_start(last, &tz));
 
         let cell = ((ui.available_width() - 6.0 * 2.0) / 7.0).clamp(24.0, 60.0);
         egui::Grid::new("mois")
@@ -518,15 +534,19 @@ impl CalendarWidget {
         widgets::row_separator(ui);
         let day_items: Vec<Item> = if (first..last).contains(&selected) {
             items
-                .into_iter()
+                .iter()
                 .filter(|it| it.occ.when.on_day(selected, &tz))
+                .cloned()
                 .collect()
         } else {
-            self.collect(
+            // Jour choisi dans un autre mois : en cache aussi, pas recalculé à chaque
+            // image.
+            self.cached(
+                Window::Day,
                 day_start(selected, &tz),
                 day_start(selected.tomorrow().unwrap_or(selected), &tz),
-                &tz,
             )
+            .to_vec()
         };
         ui.label(RichText::new(day_title(selected, today)).size(theme::SIZE_M));
         if day_items.is_empty() {
@@ -557,7 +577,7 @@ impl CalendarWidget {
         let now = Timestamp::now();
         let minute =
             Timestamp::from_second(now.as_second() - now.as_second().rem_euclid(60)).unwrap_or(now);
-        let items = self.cached(false, minute, day_start(end, &tz));
+        let items = self.cached(Window::View, minute, day_start(end, &tz));
         if items.is_empty() {
             ui.label(widgets::dim(t!("widgets2.cal_nothing_soon")));
             return;
@@ -659,6 +679,19 @@ fn load(
             .map_err(LoadError::Calendar),
         migrated,
     }
+}
+
+/// Oublie les rappels envoyés pour des débuts passés depuis plus d'un jour, et garde
+/// au plus [`REMINDED_MAX`] rappels.
+fn prune_reminded(reminded: &mut Vec<String>, now: Timestamp) {
+    let horizon = now.as_second() - 24 * 3600;
+    reminded.retain(|key| {
+        key.rsplit_once('@')
+            .and_then(|(_, start)| start.parse::<i64>().ok())
+            .is_some_and(|start| start >= horizon)
+    });
+    let excess = reminded.len().saturating_sub(REMINDED_MAX);
+    reminded.drain(..excess);
 }
 
 /// Rappels à envoyer maintenant : début dans moins de `minutes`, pas encore commencé,
@@ -823,7 +856,10 @@ impl Widget for CalendarWidget {
         }
         if let Some(id) = retry {
             let legacy = legacy_url(&self.s.calendars, &id);
-            if let Some(slot) = self.slots.get_mut(&id) {
+            // Un seul chargement à la fois : un clic de plus pendant l'essai ne relance rien.
+            if let Some(slot) = self.slots.get_mut(&id)
+                && slot.task.is_none()
+            {
                 spawn(slot, &self.factory, &self.secrets, id, legacy, ui);
             }
         }
@@ -982,7 +1018,7 @@ impl Widget for CalendarWidget {
         let now = Instant::now();
         let mut next = self.slots.values().filter_map(|s| s.due(now)).min();
         if self.s.reminder_minutes > 0
-            && let (Some(cache), Some(tz)) = (&self.soon_cache, &self.tz)
+            && let (Some(cache), Some(tz)) = (&self.caches[Window::Soon as usize], &self.tz)
         {
             let r = next_reminder(&cache.items, Timestamp::now(), self.s.reminder_minutes, tz);
             next = match (next, r) {
@@ -1203,6 +1239,56 @@ mod tests {
             next_reminder(&items, now, 10, &tz),
             Some(Duration::from_secs(50 * 60))
         );
+    }
+
+    /// Rappels envoyés notés dans les réglages : pas de doublon après une relance ; les
+    /// anciens sont oubliés.
+    #[test]
+    fn sent_reminders_survive_a_restart() {
+        let now: Timestamp = "2026-11-26T10:00:00Z".parse().unwrap();
+        let start = "2026-11-26T10:08:00Z"
+            .parse::<Timestamp>()
+            .unwrap()
+            .as_second();
+        let s = CalendarSettings {
+            reminded: vec![format!("bientot@{start}")],
+            ..Default::default()
+        };
+        let (w, _) = widget(s);
+        let items = vec![timed("bientot", "2026-11-26T10:08:00Z", 30)];
+        assert!(due_reminders(&items, now, 10, &w.notified, &TimeZone::UTC).is_empty());
+
+        let old = now.as_second() - 3 * 24 * 3600;
+        let mut reminded = vec![
+            format!("vieux@{old}"),
+            format!("a@b@{start}"),
+            "abîmé".into(),
+        ];
+        prune_reminded(&mut reminded, now);
+        assert_eq!(reminded, [format!("a@b@{start}")]);
+        let mut many: Vec<String> = (0..REMINDED_MAX + 5)
+            .map(|k| format!("x{k}@{start}"))
+            .collect();
+        prune_reminded(&mut many, now);
+        assert_eq!(many.len(), REMINDED_MAX);
+        assert_eq!(many[0], "x5@".to_owned() + &start.to_string());
+    }
+
+    /// Une même fenêtre n'est pas recalculée (ni recopiée) d'une image à l'autre.
+    #[test]
+    fn occurrences_are_computed_once_per_window() {
+        let (mut w, _) = widget(settings(&["https://google.test/a.ics"], View::Month));
+        render(&mut w, 1);
+        wait(&mut w);
+        let (from, to) = (
+            "2026-11-01T00:00:00Z".parse().unwrap(),
+            "2026-12-01T00:00:00Z".parse().unwrap(),
+        );
+        let a = w.cached(Window::Day, from, to);
+        let b = w.cached(Window::Day, from, to);
+        assert!(Arc::ptr_eq(&a, &b));
+        w.version += 1;
+        assert!(!Arc::ptr_eq(&a, &w.cached(Window::Day, from, to)));
     }
 
     #[test]
