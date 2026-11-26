@@ -19,6 +19,7 @@ mod organization;
 mod pages;
 mod quick_actions;
 mod report;
+mod search;
 mod shortcuts;
 mod vault;
 /// Page Widgets (lot H). Nommée autrement que `tidy_ui::widgets`, importé ici.

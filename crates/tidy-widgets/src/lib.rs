@@ -22,6 +22,8 @@ pub mod notes;
 pub mod pomodoro;
 pub mod quick_tools;
 
+pub mod search_mini;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -134,6 +136,7 @@ pub fn kinds() -> Vec<WidgetKind> {
         notes::kind(),
         pomodoro::kind(),
         quick_tools::kind(),
+        search_mini::kind(),
         WidgetKind {
             id: "weather",
             name_key: "widgets2.weather_name",
@@ -187,7 +190,12 @@ mod tests {
     fn every_kind_has_a_translated_name() {
         for k in kinds() {
             assert_ne!(tidy_ui::i18n::tr(k.name_key), k.name_key, "{}", k.id);
-            assert!(k.default_size[0] >= 100.0 && k.default_size[1] >= 60.0);
+            // Search Mini n'est qu'un champ : 40 points de haut suffisent.
+            assert!(
+                k.default_size[0] >= 100.0 && k.default_size[1] >= 40.0,
+                "{} trop petit",
+                k.id
+            );
         }
     }
 

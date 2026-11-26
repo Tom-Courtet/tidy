@@ -67,6 +67,9 @@ ureq = { version = "3.5.2", default-features = false, features = ["native-tls-no
 # trousseau (macOS), jamais dans `config.json` (lot I). MIT ou Apache-2.0.
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
 
+# Recherche floue de la recherche rapide (lot G). Licence MPL-2.0 (par fichier, pas GPL).
+nucleo-matcher = "0.3.1"
+
 [profile.release]
 opt-level = "s"
 lto = true

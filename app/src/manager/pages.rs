@@ -25,6 +25,7 @@ pub fn show(m: &mut Manager, ui: &mut egui::Ui) {
         Page::Widgets => super::widgets_page::show(m, ui),
         Page::Options => options(m, ui),
         Page::Diagnostic => diagnostic(m, ui),
+        Page::Search => super::search::show(m, ui),
         page => coming_soon(ui, page),
     }
     ui.add_space(24.0);

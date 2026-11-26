@@ -1,10 +1,26 @@
 [package]
 name = "tidy-search"
+description = "Recherche rapide de Tidy : index en mémoire, recherche floue, surveillance des dossiers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+directories.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tidy-core.workspace = true
+# Recherche floue (insensible à la casse et aux accents).
+nucleo-matcher.workspace = true
+# Mise à jour de l'index (ReadDirectoryChangesW, FSEvents).
+notify.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

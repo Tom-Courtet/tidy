@@ -27,6 +27,8 @@ pub fn handle(
         // Une ligne par module traité par l'agent, par exemple :
         // "layouts" => super::layouts::handle(store, bus, &action, data),
         "layouts" => super::layouts::handle(store, bus, &action, data),
+
+        "search" => super::search::handle(bus, &action, data),
         _ => {
             bus.publish(Event::Module {
                 module,
