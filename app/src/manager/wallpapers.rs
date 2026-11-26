@@ -38,6 +38,9 @@ const CELL: egui::Vec2 = egui::vec2(160.0, 90.0);
 const LABEL_HEIGHT: f32 = 20.0;
 /// Fréquence de mise à jour de l'état des fonds (agent).
 const STATUS_EVERY: Duration = Duration::from_secs(3);
+/// Miniatures gardées en mémoire graphique au plus (les moins récemment vues partent ;
+/// elles restent en cache sur le disque et reviennent vite).
+const MAX_TEXTURES: usize = 96;
 
 /// État des fonds rendu par l'agent (`status`).
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -127,10 +130,13 @@ struct PageState {
     selected: Option<Uuid>,
     /// Écran visé par « Appliquer » (`None` : tous les écrans).
     target: Option<String>,
-    textures: HashMap<Uuid, egui::TextureHandle>,
+    /// Miniatures chargées, avec l'image où elles ont servi pour la dernière fois.
+    textures: HashMap<Uuid, (egui::TextureHandle, u64)>,
     /// Miniatures demandées (ou impossibles) : pas redemandées.
     requested: HashSet<Uuid>,
     worker: Option<ThumbWorker>,
+    /// Numéro de l'image en cours (âge des miniatures).
+    frame: u64,
     new_category: String,
     /// Couleur unie en cours de choix.
     color: Option<Color32>,
@@ -208,8 +214,13 @@ impl PageState {
         ctx.request_repaint_after(STATUS_EVERY);
     }
 
-    /// Miniatures prêtes, et demandes pour celles qui manquent.
+    /// Miniatures prêtes. Elles ne sont demandées qu'à l'affichage de leur case
+    /// ([`PageState::thumb`]).
     fn pump_thumbs(&mut self, m: &Manager, ctx: &egui::Context) {
+        self.frame += 1;
+        if self.worker.is_none() && !self.library.items.is_empty() {
+            self.worker = ThumbWorker::spawn(m.store.root().to_owned(), ctx.clone());
+        }
         if let Some(worker) = &self.worker {
             while let Ok((id, image)) = worker.results.try_recv() {
                 if let Some(img) = image {
@@ -219,29 +230,43 @@ impl PageState {
                     );
                     let texture =
                         ctx.load_texture(format!("fond-{id}"), color, egui::TextureOptions::LINEAR);
-                    self.textures.insert(id, texture);
+                    self.textures.insert(id, (texture, self.frame));
                 }
             }
         }
-        let missing: Vec<Wallpaper> = self
-            .library
-            .items
+    }
+
+    /// Miniature d'une case visible : demandée si elle manque, notée comme vue.
+    fn thumb(&mut self, w: &Wallpaper) -> Option<egui::TextureHandle> {
+        if let Some((texture, seen)) = self.textures.get_mut(&w.id) {
+            *seen = self.frame;
+            return Some(texture.clone());
+        }
+        if let Some(worker) = &self.worker
+            && self.requested.insert(w.id)
+        {
+            let _ = worker.jobs.send(w.clone());
+        }
+        None
+    }
+
+    /// Garde au plus [`MAX_TEXTURES`] miniatures : les moins récemment vues partent
+    /// (redemandées si leur case revient à l'écran).
+    fn trim_textures(&mut self) {
+        let excess = self.textures.len().saturating_sub(MAX_TEXTURES);
+        if excess == 0 {
+            return;
+        }
+        let mut by_age: Vec<(u64, Uuid)> = self
+            .textures
             .iter()
-            .filter(|w| !self.requested.contains(&w.id))
-            .cloned()
+            .filter(|(_, (_, seen))| *seen < self.frame)
+            .map(|(id, (_, seen))| (*seen, *id))
             .collect();
-        if missing.is_empty() {
-            return;
-        }
-        if self.worker.is_none() {
-            self.worker = ThumbWorker::spawn(m.store.root().to_owned(), ctx.clone());
-        }
-        let Some(worker) = &self.worker else {
-            return;
-        };
-        for w in missing {
-            self.requested.insert(w.id);
-            let _ = worker.jobs.send(w);
+        by_age.sort_unstable();
+        for (_, id) in by_age.into_iter().take(excess) {
+            self.textures.remove(&id);
+            self.requested.remove(&id);
         }
     }
 }
@@ -657,13 +682,14 @@ fn grid(m: &mut Manager, st: &mut PageState, ui: &mut Ui) {
             }
         }
     });
+    st.trim_textures();
     if let Some(id) = apply {
         apply_item(m, st, id);
     }
 }
 
 /// Une miniature cliquable, avec son nom.
-fn cell(ui: &mut Ui, st: &PageState, w: &Wallpaper) -> egui::Response {
+fn cell(ui: &mut Ui, st: &mut PageState, w: &Wallpaper) -> egui::Response {
     let size = egui::vec2(CELL.x, CELL.y + LABEL_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let response = response
@@ -673,9 +699,11 @@ fn cell(ui: &mut Ui, st: &PageState, w: &Wallpaper) -> egui::Response {
         return response;
     }
     let image_rect = egui::Rect::from_min_size(rect.min, CELL);
+    // Seulement pour une case visible : pas de miniature pour toute la bibliothèque.
+    let texture = st.thumb(w);
     let painter = ui.painter();
     painter.rect_filled(image_rect, 10, theme::SURFACE_HI);
-    match st.textures.get(&w.id) {
+    match texture {
         Some(texture) => {
             let [tw, th] = texture.size().map(|v| v as f32);
             // Remplir la case sans déformer : on coupe ce qui dépasse.
@@ -863,6 +891,7 @@ fn details(m: &mut Manager, st: &mut PageState, ui: &mut Ui, id: Uuid) {
             st.library.remove(id);
             thumbs::forget(m.store.root(), id);
             st.textures.remove(&id);
+            st.requested.remove(&id);
             st.selected = None;
             st.save_library(m);
             m.settings.wallpaper.forget_item(id);
@@ -1142,4 +1171,37 @@ fn online(m: &mut Manager, st: &mut PageState, ui: &mut Ui) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Au-delà de `MAX_TEXTURES`, les miniatures les moins récemment vues partent ;
+    /// celles de l'image en cours restent.
+    #[test]
+    fn thumbnail_textures_are_bounded() {
+        let ctx = egui::Context::default();
+        let mut st = PageState {
+            frame: 1000,
+            ..Default::default()
+        };
+        let image = egui::ColorImage::new([2, 2], vec![Color32::BLACK; 4]);
+        let mut ids = Vec::new();
+        for k in 0..(MAX_TEXTURES as u64 + 10) {
+            let id = Uuid::new_v4();
+            let texture = ctx.load_texture("essai", image.clone(), egui::TextureOptions::LINEAR);
+            st.textures.insert(id, (texture, k));
+            st.requested.insert(id);
+            ids.push(id);
+        }
+        st.trim_textures();
+        assert_eq!(st.textures.len(), MAX_TEXTURES);
+        assert!(!st.textures.contains_key(&ids[0]), "la plus ancienne part");
+        assert!(
+            !st.requested.contains(&ids[0]),
+            "redemandée si elle revient"
+        );
+        assert!(st.textures.contains_key(ids.last().unwrap()));
+    }
 }
