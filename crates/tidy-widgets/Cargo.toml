@@ -14,12 +14,16 @@ serde_json.workspace = true
 tidy-core.workspace = true
 tidy-ui.workspace = true
 # Lot H : fuseaux horaires (horloge), dates des notes, identifiants des notes, journaux.
+# Lot I : widgets en ligne (météo, agendas ICS, chat IA).
 jiff.workspace = true
 log.workspace = true
 uuid.workspace = true
+tidy-integrations.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Aperçu des widgets sans l'hôte du bureau (`--example apercu`, lot I).
+eframe.workspace = true
 
 [lints]
 workspace = true

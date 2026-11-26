@@ -28,6 +28,12 @@ use std::time::Duration;
 /// Clé des réglages d'une instance où l'hôte garde l'épinglage au premier plan.
 pub const PINNED_KEY: &str = "pinned_on_top";
 
+// Widgets en ligne (lot I).
+mod ai_chat;
+mod calendar;
+mod online;
+mod weather;
+
 /// Ce qu'un widget demande à son hôte.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WidgetAction {
@@ -128,6 +134,27 @@ pub fn kinds() -> Vec<WidgetKind> {
         notes::kind(),
         pomodoro::kind(),
         quick_tools::kind(),
+        WidgetKind {
+            id: "weather",
+            name_key: "widgets2.weather_name",
+            icon: tidy_ui::icons::WEATHER,
+            default_size: [300.0, 380.0],
+            create: weather::create,
+        },
+        WidgetKind {
+            id: "calendar",
+            name_key: "widgets2.calendar_name",
+            icon: tidy_ui::icons::CALENDAR,
+            default_size: [320.0, 440.0],
+            create: calendar::create,
+        },
+        WidgetKind {
+            id: "ai_chat",
+            name_key: "widgets2.ai_name",
+            icon: tidy_ui::icons::AI,
+            default_size: [360.0, 480.0],
+            create: ai_chat::create,
+        },
     ]
 }
 
