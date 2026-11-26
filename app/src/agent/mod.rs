@@ -14,6 +14,7 @@ pub mod modules;
 pub mod organizer;
 mod supervisor;
 mod tray;
+pub mod wallpaper;
 mod watcher;
 
 use std::path::PathBuf;
@@ -74,6 +75,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
     let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
     supervisor.send(Command::Apply(settings.effective_desktop_mode()));
     organizer::start(store.clone(), bus.clone(), Arc::clone(&shared));
+    wallpaper::start(store.clone(), bus.clone());
 
     let handler = {
         let proxy = proxy.clone();

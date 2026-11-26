@@ -26,6 +26,7 @@ pub fn handle(
     match module.as_str() {
         // Une ligne par module traité par l'agent, par exemple :
         // "layouts" => super::layouts::handle(store, bus, &action, data),
+        "wallpaper" => super::wallpaper::handle(&action),
         _ => {
             bus.publish(Event::Module {
                 module,

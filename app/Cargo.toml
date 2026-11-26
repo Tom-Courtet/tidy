@@ -34,6 +34,9 @@ notify.workspace = true
 jiff.workspace = true
 # Choix d'un dossier (portails de dossier, fenêtre principale).
 rfd.workspace = true
+# Fonds d'écran (lot J) : bibliothèque, playlist, lecteur vidéo.
+tidy-wallpaper.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

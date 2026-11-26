@@ -2644,11 +2644,13 @@ dependencies = [
  "tidy-core",
  "tidy-platform",
  "tidy-ui",
+ "tidy-wallpaper",
  "tidy-widgets",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon",
+ "uuid",
  "winit",
 ]
 

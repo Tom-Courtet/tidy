@@ -235,3 +235,110 @@ impl Worker {
         }
     }
 }
+
+// --- Vague 3, lot J : processus enfant générique (lecteur des fonds animés). ---
+
+/// Processus enfant de Tidy (`tidy <arg>`) relancé s'il s'arrête de lui-même, avec la
+/// règle du bureau : [`MAX_CRASHES`] arrêts imprévus en [`CRASH_WINDOW`] et Tidy
+/// n'insiste plus (jusqu'au prochain [`ChildProcess::reset`]). Sert au lecteur des
+/// fonds animés (`tidy --wallpaper`), lancé seulement quand un fond vidéo est actif.
+pub struct ChildProcess {
+    arg: &'static str,
+    child: Option<Child>,
+    crashes: VecDeque<Instant>,
+    gave_up: bool,
+}
+
+impl ChildProcess {
+    pub fn new(arg: &'static str) -> Self {
+        Self {
+            arg,
+            child: None,
+            crashes: VecDeque::new(),
+            gave_up: false,
+        }
+    }
+
+    pub fn running(&self) -> bool {
+        self.child.is_some()
+    }
+
+    /// Tidy a renoncé après trop d'arrêts imprévus.
+    pub fn gave_up(&self) -> bool {
+        self.gave_up
+    }
+
+    /// Nouvelle chance après un abandon (changement de réglage).
+    pub fn reset(&mut self) {
+        self.gave_up = false;
+        self.crashes.clear();
+    }
+
+    /// Lance le processus s'il ne tourne pas (et si Tidy n'a pas renoncé).
+    pub fn ensure(&mut self) {
+        if self.child.is_some() || self.gave_up {
+            return;
+        }
+        let spawned =
+            std::env::current_exe().and_then(|exe| Process::new(exe).arg(self.arg).spawn());
+        match spawned {
+            Ok(child) => {
+                log::info!("{} lancé (pid {})", self.arg, child.id());
+                self.child = Some(child);
+            }
+            Err(e) => log::error!("lancement de {} impossible : {e}", self.arg),
+        }
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+            log::info!("{} arrêté", self.arg);
+        }
+    }
+
+    /// À appeler régulièrement : relance le processus s'il s'est arrêté de lui-même.
+    /// Rend `true` s'il vient de s'arrêter.
+    pub fn check(&mut self) -> bool {
+        let Some(child) = &mut self.child else {
+            return false;
+        };
+        let status = match child.try_wait() {
+            Ok(Some(status)) => status,
+            Ok(None) => return false,
+            Err(e) => {
+                log::warn!("état de {} illisible : {e}", self.arg);
+                return false;
+            }
+        };
+        self.child = None;
+        log::warn!("{} s'est arrêté ({status})", self.arg);
+        let now = Instant::now();
+        self.crashes.push_back(now);
+        while self
+            .crashes
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > CRASH_WINDOW)
+        {
+            self.crashes.pop_front();
+        }
+        if self.crashes.len() >= MAX_CRASHES {
+            log::error!(
+                "{} s'est arrêté {MAX_CRASHES} fois en une minute : Tidy n'insiste pas",
+                self.arg
+            );
+            self.gave_up = true;
+            return true;
+        }
+        thread::sleep(Duration::from_millis(300 * self.crashes.len() as u64));
+        self.ensure();
+        true
+    }
+}
+
+impl Drop for ChildProcess {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}

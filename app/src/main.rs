@@ -223,6 +223,10 @@ fn main() -> Result<()> {
             let marker = store.finder_marker_path();
             let _ =
                 tidy_platform::finder::restore_icons(&tidy_platform::finder::SystemFinder, &marker);
+            // Fond d'écran d'origine (lot J).
+            if let Err(e) = agent::wallpaper::restore_original(&store) {
+                eprintln!("fond d'écran d'origine : {e:#}");
+            }
             println!(
                 "Tidy est retiré du système. Tes réglages restent dans {} (à supprimer à la main si tu veux).",
                 store.root().display()
