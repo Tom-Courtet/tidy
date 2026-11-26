@@ -98,6 +98,26 @@ Les boîtes montrent alors ce dossier (les icônes de l'Explorateur ne sont pas 
 - [ ] Pages Boîtes (apparence, aperçu), Rangement (extensions, boîte cible), Actions rapides ; saisie d'un raccourci et refus d'un doublon.
 - [ ] Menu ☰ d'une boîte > « Apparence… » : la fenêtre principale s'ouvre (ou revient) sur la page Boîtes, sans en ouvrir une deuxième.
 
+### Correctifs du 26/11 (après le premier essai)
+**Icônes rangées** (sur le vrai bureau)
+- [ ] Après le démarrage rapide, les icônes rangées dans les boîtes **disparaissent** du bureau de Windows (plus de doublons).
+- [ ] « Aligner les icônes sur la grille » coché (clic droit sur le bureau > Affichage) : même résultat ; l'option est recochée en quittant Tidy.
+- [ ] « Quitter Tidy » : toutes les icônes reviennent à leur place.
+- [ ] Si des icônes restent visibles : envoyer les lignes « icônes rangées » du journal (Options > Diagnostic > Ouvrir les journaux), et la sortie de `.\tidy.exe --hide-icon "<nom exact>"` (elle dit si l'icône est « absente du bureau de l'Explorateur » ou « restée à l'écran »).
+
+**Raccourcis**
+- [ ] Les raccourcis posés par les installateurs (Chrome, Steam, Office… souvent dans `C:\Users\Public\Desktop`) sont rangés dans « Programmes », et leur icône disparaît du bureau.
+- [ ] Ils s'ouvrent par double-clic depuis la boîte.
+
+**Grille libre** (ordre manuel, vue en grille : réglages par défaut)
+- [ ] Glisser une icône sur une case vide de la boîte, même loin des autres : elle y reste et laisse un trou à sa place d'origine.
+- [ ] Glisser une icône sur une case occupée : elle va sur la case libre la plus proche.
+- [ ] Glisser plusieurs icônes sélectionnées : celle qu'on tient va sur la case visée, les autres suivent.
+- [ ] Glisser une icône depuis une autre boîte sur une case précise : elle s'y pose.
+- [ ] Quitter puis relancer Tidy : la disposition est la même.
+- [ ] Rétrécir la boîte puis l'élargir : les icônes reprennent leurs cases.
+- [ ] Menu ☰ > Trier > « Supprimer les cases vides » : les icônes se suivent à nouveau. Trier par nom ignore les cases ; revenir à « Ordre manuel » les retrouve.
+
 ## macOS
 
 Avec des données jetables :

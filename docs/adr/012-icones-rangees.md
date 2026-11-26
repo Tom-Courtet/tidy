@@ -14,6 +14,7 @@ Sous Windows, l'icône d'un élément rangé dans une boîte est **déplacée ho
 ## Conséquences
 
 - Aucun fichier touché. Si l'Explorateur remet une icône à l'écran (redémarrage), la synchronisation suivante la renvoie, en gardant sa position d'origine.
-- Éléments du bureau public (`C:\Users\Public\Desktop`) : pas encore pris en compte par les boîtes (vague 1).
+- Éléments du bureau public (`C:\Users\Public\Desktop`) : rangés comme les autres depuis le 26/11/2026 (désignés par leur nom ; en cas de doublon, celui du bureau de l'utilisateur l'emporte). Les mettre à la corbeille ou les renommer demande souvent les droits d'administrateur.
 - macOS : pas d'équivalent (le Finder ne se pilote pas ainsi) ; les icônes rangées restent visibles derrière les boîtes en mode superposé.
 - Vague 1 : la synchronisation doit être relancée à chaque changement du contenu des boîtes.
+- 26/11/2026, après le premier essai sur Windows (icônes restées visibles) : un **verrou** (`icon-stash.lock`) empêche l'agent et le bureau de synchroniser en même temps (l'un pouvait réécrire le journal sans les positions notées par l'autre) ; chaque déplacement est **vérifié** ; si l'Explorateur remet l'icône à l'écran, Tidy coupe « Aligner les icônes sur la grille » (rétabli comme la disposition automatique) puis essaie de l'autre côté de l'écran. Les icônes restées visibles et les éléments introuvables dans la vue de l'Explorateur sont notés dans le journal.

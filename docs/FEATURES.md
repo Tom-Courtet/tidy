@@ -43,7 +43,7 @@ Référence : `prompt-easy-desktop-rust.md` (le prompt, marqueurs [C] confirmé 
 | Créer, déplacer, redimensionner, renommer, supprimer une boîte | fait | 1 | suppression : éléments rendus au bureau, aucun fichier touché |
 | Création en dessinant un rectangle | partiel | 1 | Windows : crochet souris + bouton « Créer une boîte » ; macOS : pas encore |
 | Menu du bureau « Créer une boîte » | partiel | 0 bis | Windows : verbe du registre (Win 11 : « Afficher plus d'options ») ; `tidy --create-box` |
-| Contenu réel : grille/liste, tri, regroupement par date, sélection, ouverture | fait | 1 | simple ou double clic selon le réglage |
+| Contenu réel : grille/liste, tri, regroupement par date, sélection, ouverture | fait | 1 | simple ou double clic selon le réglage ; grille libre (cases vides possibles) en ordre manuel |
 | Icônes système et miniatures | fait | 1 | cache borné ; repli Lucide par catégorie |
 | Menu d'un élément | fait | 1 | Windows : menu natif de l'Explorateur ; macOS : menu Tidy (ouvrir, afficher, renommer, corbeille, copier le chemin, retirer) |
 | Renommer un fichier, corbeille | fait | 1 | jamais de suppression définitive |
