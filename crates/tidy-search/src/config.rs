@@ -17,8 +17,12 @@ pub const DEFAULT_KEYS: [&str; 7] = [
 ];
 
 /// Exclusions de Tidy, toujours appliquées (noms, sans tenir compte de la casse).
-pub const BUILTIN_EXCLUSIONS: [&str; 17] = [
+pub const BUILTIN_EXCLUSIONS: [&str; 21] = [
     "node_modules",
+    "bower_components",
+    "Pods",
+    "DerivedData",
+    "venv",
     ".git",
     ".svn",
     ".hg",

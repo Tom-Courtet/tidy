@@ -75,6 +75,9 @@ pub struct Index {
     pub(crate) dirs: Vec<Dir>,
     pub(crate) dir_ids: HashMap<Box<str>, DirId>,
     pub(crate) entries: Vec<Entry>,
+    /// Dossiers de cache (`CACHEDIR.TAG` : `target` de Rust…), indexés sans leur
+    /// contenu ; leurs changements sont ignorés.
+    pub(crate) caches: Vec<PathBuf>,
 }
 
 impl Index {
@@ -203,7 +206,11 @@ impl Index {
             self.entries
                 .push(Entry::new(name, id, category, is_dir, modified));
             if is_dir {
-                subdirs.push(path);
+                if is_cache_dir(&path) {
+                    self.caches.push(path);
+                } else {
+                    subdirs.push(path);
+                }
             }
         }
     }
@@ -221,7 +228,8 @@ impl Index {
                     .to_str()
                     .is_none_or(|n| config.exclusions.excludes_name(n))
             });
-            if excluded || config.exclusions.excludes_path(changed) {
+            let in_cache = self.caches.iter().any(|c| changed.starts_with(c));
+            if excluded || in_cache || config.exclusions.excludes_path(changed) {
                 return;
             }
         }
@@ -328,6 +336,12 @@ impl Index {
             modified,
         ));
     }
+}
+
+/// Dossier de cache marqué selon la convention `CACHEDIR.TAG` (dossiers `target` de
+/// Rust, caches de navigateurs et d'outils) : son contenu n'intéresse pas la recherche.
+fn is_cache_dir(dir: &Path) -> bool {
+    dir.join("CACHEDIR.TAG").is_file()
 }
 
 #[cfg(test)]

@@ -32,3 +32,8 @@ pub use tab::Tab;
 pub fn cache_path(data_dir: &std::path::Path) -> std::path::PathBuf {
     data_dir.join("search").join("index.bin")
 }
+
+/// Dossier personnel de l'utilisateur.
+pub fn home_dir() -> Option<std::path::PathBuf> {
+    directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+}
