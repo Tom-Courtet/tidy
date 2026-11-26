@@ -9,9 +9,24 @@
 //!
 //! Un widget ne touche ni au réseau ni au disque dans `ui` : les accès longs passent
 //! par un fil à lui (voir les widgets de `tidy-integrations`).
+//!
+//! Lot H : horloge ([`clock`]), notes ([`notes`]), pomodoro ([`pomodoro`]) et outils
+//! rapides ([`quick_tools`]).
+//!
+//! Clé réservée : l'hôte garde l'état « épinglé au premier plan » d'une instance dans
+//! ses réglages, sous [`PINNED_KEY`] (ajoutée à l'objet rendu par [`Widget::save`]).
+//! Un widget ne doit pas s'en servir pour autre chose.
+
+pub mod clock;
+pub mod notes;
+pub mod pomodoro;
+pub mod quick_tools;
 
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// Clé des réglages d'une instance où l'hôte garde l'épinglage au premier plan.
+pub const PINNED_KEY: &str = "pinned_on_top";
 
 /// Ce qu'un widget demande à son hôte.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +45,18 @@ pub enum WidgetAction {
     PinOnTop(bool),
     /// Ouvrir la fenêtre principale sur une page (`"widgets"`…).
     OpenManager(String),
+    // --- Lot H ---
+    /// Notification native, avec ou sans son (iPomodoro : son réglable).
+    Alert {
+        title: String,
+        body: String,
+        sound: bool,
+    },
+    /// Lancer un programme avec ses arguments (outils rapides : verrouiller la
+    /// session…). Pour un fichier, une appli ou une adresse, préférer [`Self::Open`].
+    Launch { program: String, args: Vec<String> },
+    /// Masquer (`true`) ou rendre (`false`) le bureau : mode concentration.
+    HideDesktop(bool),
 }
 
 /// Contexte passé à chaque image.
@@ -66,6 +93,17 @@ pub trait Widget: Send {
     fn repaint_after(&self) -> Option<Duration> {
         None
     }
+    // --- Lot H ---
+    /// Taille voulue du contenu, en points (sans le cadre de l'hôte) : l'hôte
+    /// redimensionne la fenêtre quand elle change (horloge : taille, fuseaux). `None` :
+    /// taille libre, choisie par l'utilisateur.
+    fn preferred_size(&self) -> Option<[f32; 2]> {
+        None
+    }
+    /// Rester visible même quand le bureau est masqué (pomodoro en mode concentration).
+    fn keep_visible(&self) -> bool {
+        false
+    }
 }
 
 /// Un type de widget du registre.
@@ -85,7 +123,12 @@ pub struct WidgetKind {
 /// Tous les types de widgets, dans l'ordre du catalogue. Chaque lot ajoute ici les
 /// siens (une ligne par widget).
 pub fn kinds() -> Vec<WidgetKind> {
-    vec![]
+    vec![
+        clock::kind(),
+        notes::kind(),
+        pomodoro::kind(),
+        quick_tools::kind(),
+    ]
 }
 
 /// Type de widget d'après sa clé.
@@ -109,6 +152,34 @@ mod tests {
             let w = (k.create)(&serde_json::Value::Null);
             let again = (k.create)(&w.save());
             assert_eq!(again.save(), w.save(), "{} : réglages perdus", k.id);
+        }
+    }
+
+    /// Le nom de chaque widget est traduit (la clé ne passe pas par `t!`).
+    #[test]
+    fn every_kind_has_a_translated_name() {
+        for k in kinds() {
+            assert_ne!(tidy_ui::i18n::tr(k.name_key), k.name_key, "{}", k.id);
+            assert!(k.default_size[0] >= 100.0 && k.default_size[1] >= 60.0);
+        }
+    }
+
+    /// Chaque widget se dessine, avec ses réglages, sans écran.
+    #[test]
+    fn every_kind_draws() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = egui::Context::default();
+        tidy_ui::theme::apply(&ctx);
+        for k in kinds() {
+            let mut w = (k.create)(&serde_json::Value::Null);
+            let mut cx = WidgetCx::new(dir.path().to_path_buf());
+            for _ in 0..2 {
+                let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    w.ui(ui, &mut cx);
+                    w.settings_ui(ui, &mut cx);
+                });
+                out.drop_without_applying_deltas();
+            }
         }
     }
 }

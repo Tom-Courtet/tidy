@@ -13,6 +13,13 @@ serde.workspace = true
 serde_json.workspace = true
 tidy-core.workspace = true
 tidy-ui.workspace = true
+# Lot H : fuseaux horaires (horloge), dates des notes, identifiants des notes, journaux.
+jiff.workspace = true
+log.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

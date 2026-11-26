@@ -2385,6 +2385,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon",
+ "uuid",
  "winit",
 ]
 
@@ -2456,10 +2457,14 @@ name = "tidy-widgets"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "jiff",
+ "log",
  "serde",
  "serde_json",
+ "tempfile",
  "tidy-core",
  "tidy-ui",
+ "uuid",
 ]
 
 [[package]]
