@@ -163,7 +163,36 @@ pub trait DesktopPlatform: Send + Sync {
 
     fn login_item(&self) -> LoginState;
     fn set_login_item(&self, enabled: bool) -> Result<LoginState>;
+
+    // --- Vague 2, lot F (boîte privée). Valeurs par défaut : « pas disponible ». ---
+
+    /// Prévient à la mise en veille et au verrouillage de la session (pour verrouiller
+    /// la boîte privée). À appeler une fois, sur le thread principal (boucle de
+    /// messages lancée). `false` : pas disponible.
+    fn watch_session(&self, _on_event: SessionCallback) -> bool {
+        false
+    }
+
+    /// Secondes écoulées depuis la dernière action au clavier ou à la souris, dans tout
+    /// le système. `None` : pas disponible.
+    fn idle_seconds(&self) -> Option<f64> {
+        None
+    }
 }
+
+/// Événement de session (lot F).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionEvent {
+    /// Session verrouillée (Win+L, écran de verrouillage).
+    Locked,
+    Unlocked,
+    /// Mise en veille imminente.
+    Sleep,
+    Wake,
+}
+
+/// Rappel recevant un [`SessionEvent`], depuis le thread principal.
+pub type SessionCallback = Box<dyn Fn(SessionEvent) + Send + Sync>;
 
 /// macOS : appelle `on_reopen` quand l'utilisateur rouvre Tidy.app alors qu'il tourne
 /// (Finder, Launchpad, Spotlight). À installer une fois, sur le thread principal, la

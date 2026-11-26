@@ -4,6 +4,7 @@ mod files;
 mod login;
 pub mod reopen;
 mod screens;
+mod session;
 mod watch;
 mod window;
 
@@ -16,7 +17,7 @@ use raw_window_handle::HasWindowHandle;
 use tidy_core::geometry::{Point, Rect};
 use tidy_core::screen::Screen;
 
-use crate::{Callback, DesktopPlatform, IconImage, LoginState, SurfaceLevel};
+use crate::{Callback, DesktopPlatform, IconImage, LoginState, SessionCallback, SurfaceLevel};
 
 pub struct MacPlatform;
 
@@ -109,6 +110,16 @@ impl DesktopPlatform for MacPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         login::set(enabled)
+    }
+
+    // --- Lot F (boîte privée). ---
+
+    fn watch_session(&self, on_event: SessionCallback) -> bool {
+        session::watch_session(on_event)
+    }
+
+    fn idle_seconds(&self) -> Option<f64> {
+        session::idle_seconds()
     }
 }
 

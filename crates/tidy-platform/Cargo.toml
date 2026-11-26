@@ -20,18 +20,22 @@ block2.workspace = true
 objc2.workspace = true
 # Vague 1 (lot B) : icônes (NSImage → CGImage), glisser vers le Finder (NSDragging*,
 # NSPasteboard), changement d'écrans (NSNotification, NSOperation).
+# Vague 2 (lot F) : veille et verrouillage (NSDistributedNotificationCenter), inactivité
+# (CGEventSource).
 objc2-app-kit = { workspace = true, features = ["std", "libc", "block2", "objc2-core-foundation", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSScreen", "NSGraphics", "NSEvent", "NSWorkspace", "NSRunningApplication", "objc2-core-graphics", "NSImage", "NSImageRep", "NSGraphicsContext", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard"] }
 objc2-core-foundation = { workspace = true, features = ["std", "CFCGTypes"] }
-objc2-core-graphics = { workspace = true, features = ["std", "libc", "CGDirectDisplay", "CGDisplayConfiguration", "CGError", "CGWindowLevel", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace"] }
-objc2-foundation = { workspace = true, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSEnumerator", "NSGeometry", "NSObject", "NSURL", "NSUserDefaults", "NSLocale", "NSNotification", "NSOperation", "NSDate"] }
+objc2-core-graphics = { workspace = true, features = ["std", "libc", "CGDirectDisplay", "CGDisplayConfiguration", "CGError", "CGWindowLevel", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGEventSource", "CGEventTypes"] }
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSEnumerator", "NSGeometry", "NSObject", "NSURL", "NSUserDefaults", "NSLocale", "NSNotification", "NSOperation", "NSDate", "NSDistributedNotificationCenter"] }
 objc2-service-management = { workspace = true, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 
 [target.'cfg(windows)'.dependencies]
 # Positions des icônes du bureau par l'API du Shell (COM : IShellWindows, IFolderView).
 # Vague 1 (lot B) : icônes (IShellItemImageFactory, HBITMAP), menu contextuel du Shell
 # (IContextMenu, HMENU), glisser-déposer (SHDoDragDrop, IDataObject).
+# Vague 2 (lot F) : session et veille (RemoteDesktop : WTSRegisterSessionNotification),
+# inactivité (SystemInformation : GetTickCount).
 windows = { workspace = true, features = ["std", "Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_Security", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_Security", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 # Corbeille (jamais de suppression définitive). Sans les options Linux (freedesktop).

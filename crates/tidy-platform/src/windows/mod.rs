@@ -6,12 +6,14 @@
 //! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
 //! - [`shell`] : icônes des fichiers, menu contextuel et glisser-déposer du Shell ;
 //! - [`watch`] : changements d'écrans ;
-//! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
+//! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
+//! - [`session`] : verrouillage de la session, veille, inactivité (lot F).
 
 mod desktop;
 mod icons;
 mod registry;
 mod screens;
+mod session;
 mod shell;
 mod watch;
 mod window;
@@ -31,7 +33,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::BOOL;
 
-use crate::{Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SurfaceLevel};
+use crate::{
+    Callback, DesktopPlatform, IconImage, LoginState, RectCallback, SessionCallback, SurfaceLevel,
+};
 
 pub struct WindowsPlatform;
 
@@ -177,6 +181,16 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         registry::set_login(enabled)
+    }
+
+    // --- Lot F (boîte privée). ---
+
+    fn watch_session(&self, on_event: SessionCallback) -> bool {
+        session::watch_session(on_event)
+    }
+
+    fn idle_seconds(&self) -> Option<f64> {
+        session::idle_seconds()
     }
 }
 
