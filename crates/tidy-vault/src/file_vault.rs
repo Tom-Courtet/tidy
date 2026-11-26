@@ -38,6 +38,10 @@ const INDEX: &str = "index.tv";
 const OBJECTS: &str = "objects";
 const OPEN: &str = "open.noindex";
 const STAGING: &str = "staging";
+/// Verrou tenu tant que le coffre est déverrouillé : un seul processus à la fois (deux
+/// index en mémoire s'écraseraient, et le ménage des objets « orphelins » de l'un
+/// supprimerait les ajouts de l'autre).
+const LOCK: &str = "vault.lock";
 const INDEX_MAGIC: &[u8; 8] = b"TIDYIDX1";
 const AAD_INDEX: &[u8] = b"tidy-vault/index/v1";
 const AAD_PASSWORD: &[u8] = b"tidy-vault/key/password/v1";
@@ -146,6 +150,8 @@ pub struct FileVault {
     key: Option<Key>,
     index: Index,
     opened: HashMap<String, Opened>,
+    /// Verrou exclusif sur [`LOCK`], tenu tant que la clé est en mémoire.
+    guard: Option<File>,
     #[cfg(test)]
     pub(crate) fault: Option<Fault>,
 }
@@ -179,6 +185,7 @@ impl FileVault {
             key: None,
             index: Index::default(),
             opened: HashMap::new(),
+            guard: None,
             #[cfg(test)]
             fault: None,
         }
@@ -291,9 +298,43 @@ impl FileVault {
             .map_err(VaultError::io("écriture de l'index"))
     }
 
+    /// Prend le verrou du coffre (voir [`LOCK`]).
+    fn acquire(&mut self) -> Result<()> {
+        if self.guard.is_some() {
+            return Ok(());
+        }
+        fs::create_dir_all(&self.root).map_err(VaultError::io("dossier du coffre"))?;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(self.root.join(LOCK))
+            .map_err(VaultError::io("verrou du coffre"))?;
+        match file.try_lock() {
+            Ok(()) => {
+                self.guard = Some(file);
+                Ok(())
+            }
+            Err(fs::TryLockError::WouldBlock) => Err(VaultError::Io {
+                context: "coffre déjà ouvert par un autre processus de Tidy",
+                error: std::io::Error::from(std::io::ErrorKind::WouldBlock),
+            }),
+            Err(fs::TryLockError::Error(e)) => Err(VaultError::io("verrou du coffre")(e)),
+        }
+    }
+
     /// Fin commune des déverrouillages : index, ménage, reprise des copies laissées.
     fn finish_unlock(&mut self, key: Key) -> Result<()> {
-        let index = self.read_index(&key)?;
+        self.acquire()?;
+        let index = match self.read_index(&key) {
+            Ok(index) => index,
+            Err(e) => {
+                if self.key.is_none() {
+                    self.guard = None;
+                }
+                return Err(e);
+            }
+        };
         self.key = Some(key);
         self.index = index;
         self.opened.clear();
@@ -764,6 +805,7 @@ impl VaultBackend for FileVault {
             version: VERSION,
             entries: Vec::new(),
         };
+        self.acquire()?;
         // L'index d'abord : l'en-tête marque le coffre comme existant.
         self.write_index(&master, &index)?;
         self.write_header(&header)?;
@@ -827,6 +869,7 @@ impl VaultBackend for FileVault {
         self.opened.clear();
         self.key = None;
         self.index.erase();
+        self.guard = None;
         report
     }
 
@@ -1067,6 +1110,7 @@ impl VaultBackend for FileVault {
         let _ = fs::remove_dir(self.root.join(OPEN));
         let _ = fs::remove_file(self.root.join(HEADER));
         let _ = fs::remove_file(self.root.join(INDEX));
+        let _ = fs::remove_file(self.root.join(LOCK));
         let _ = fs::remove_dir(&self.root);
         Ok(returned)
     }
