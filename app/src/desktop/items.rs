@@ -2,7 +2,7 @@
 //! en liste (icône système ou repli, libellé coupé proprement, sélection, ouverture,
 //! renommage, glisser).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,7 +14,10 @@ use egui::{
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use tidy_core::category::Category;
-use tidy_core::model::{Appearance, BoxId, SortKey, SortOrder, Tab, ViewMode};
+use tidy_core::grid::{self, Cell};
+use tidy_core::model::{
+    Appearance, BoxId, BoxKind, DeskBox, ItemRef, SortKey, SortOrder, Tab, ViewMode,
+};
 use tidy_core::rules::ItemInfo;
 use tidy_core::sort::{DateGroup, date_group_in, sort_items};
 use tidy_ui::{icons, t, theme};
@@ -50,6 +53,48 @@ pub fn dir_entries(mut items: Vec<ItemInfo>, sort: SortOrder) -> Vec<ItemInfo> {
         sort_items(&mut items, sort);
     }
     items
+}
+
+/// Cases notées de l'onglet actif quand la grille est libre : ordre manuel, sans
+/// regroupement, vue en grille, boîte ordinaire. `None` : les éléments se suivent.
+pub fn free_grid(b: &DeskBox) -> Option<&BTreeMap<ItemRef, Cell>> {
+    let free = b.kind == BoxKind::Normal
+        && b.view == ViewMode::Grid
+        && b.sort.key == SortKey::Manual
+        && !b.sort.group_by_date;
+    if !free {
+        return None;
+    }
+    b.tabs
+        .get(b.active_tab.min(b.tabs.len().saturating_sub(1)))
+        .map(|t| &t.cells)
+}
+
+/// Géométrie d'une grille libre affichée, pour trouver la case visée par un dépôt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridGeom {
+    /// Coin haut gauche de la première case (coordonnées de la fenêtre, puis globales
+    /// une fois rangée par le bureau).
+    pub origin: Pos2,
+    pub cell: Vec2,
+    pub columns: usize,
+}
+
+impl GridGeom {
+    /// Case sous le point `p` (même repère que `origin`), ramenée dans la largeur.
+    pub fn cell_at(&self, p: Pos2) -> Cell {
+        let col = ((p.x - self.origin.x) / self.cell.x).floor().max(0.0) as u32;
+        let row = ((p.y - self.origin.y) / self.cell.y).floor().max(0.0) as u32;
+        Cell::new(col.min(self.columns.saturating_sub(1) as u32), row)
+    }
+
+    /// Même grille, décalée de `by` (passage au repère global).
+    pub fn translated(self, by: Vec2) -> Self {
+        Self {
+            origin: self.origin + by,
+            ..self
+        }
+    }
 }
 
 /// Dossier des éléments d'une boîte : le bureau (avec le bureau public de Windows,
@@ -271,6 +316,8 @@ pub struct ItemsView<'a> {
     pub single_click: bool,
     /// Le dossier affiché est celui d'un portail (double-clic sur un dossier : entrer).
     pub portal: bool,
+    /// Grille libre : cases notées ([`free_grid`]).
+    pub free: Option<&'a BTreeMap<ItemRef, Cell>>,
 }
 
 /// Résultat du dessin.
@@ -280,6 +327,8 @@ pub struct ItemsOutput {
     pub hovered: Option<String>,
     /// Un élément est en train d'être glissé.
     pub dragging: bool,
+    /// Grille libre affichée.
+    pub grid: Option<GridGeom>,
 }
 
 /// Dessine le contenu dans `ui` (zone défilante) et rend les demandes dans `out`.
@@ -297,6 +346,7 @@ pub fn show(
         .collect();
     st.selected.retain(|n| order.contains(n));
     let mut result = ItemsOutput::default();
+    let visible_h = ui.available_height();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
@@ -306,9 +356,17 @@ pub fn show(
                     section_title(ui, tidy_ui::i18n::tr(g.key()), width);
                 }
                 match v.view {
-                    ViewMode::Grid => {
-                        grid(ui, v, section, width, &order, st, icons, out, &mut result)
-                    }
+                    ViewMode::Grid => grid(
+                        ui,
+                        v,
+                        section,
+                        (width, visible_h),
+                        &order,
+                        st,
+                        icons,
+                        out,
+                        &mut result,
+                    ),
                     ViewMode::List => {
                         list(ui, v, section, width, &order, st, icons, out, &mut result)
                     }
@@ -341,7 +399,7 @@ fn grid(
     ui: &mut Ui,
     v: &ItemsView,
     section: &Section,
-    width: f32,
+    (width, visible_h): (f32, f32),
     order: &[String],
     st: &mut ItemsState,
     icons: &mut IconCache,
@@ -349,12 +407,28 @@ fn grid(
     result: &mut ItemsOutput,
 ) {
     let m = grid_metrics(width, v.look.icon_size);
-    let rows = section.items.len().div_ceil(m.columns);
+    let names: Vec<&str> = section.items.iter().map(|i| i.name.as_str()).collect();
+    let cells: Vec<Cell> = match v.free {
+        Some(noted) => grid::layout(&names, noted, m.columns),
+        None => (0..names.len())
+            .map(|i| Cell::new((i % m.columns) as u32, (i / m.columns) as u32))
+            .collect(),
+    };
+    let mut rows = grid::rows(&cells) as usize;
+    if v.free.is_some() {
+        // Une ligne vide de plus, et au moins la hauteur visible : on peut déposer sur
+        // n'importe quelle case.
+        rows = (rows + 1).max((visible_h / m.cell.y).floor() as usize);
+    }
     let (area, _) = ui.allocate_exact_size(vec2(width, rows as f32 * m.cell.y), Sense::hover());
-    for (i, info) in section.items.iter().enumerate() {
-        let (row, col) = (i / m.columns, i % m.columns);
+    let geom = GridGeom {
+        origin: area.min,
+        cell: m.cell,
+        columns: m.columns,
+    };
+    for (info, at) in section.items.iter().zip(&cells) {
         let cell = Rect::from_min_size(
-            area.min + vec2(col as f32 * m.cell.x, row as f32 * m.cell.y),
+            area.min + vec2(at.col as f32 * m.cell.x, at.row as f32 * m.cell.y),
             m.cell,
         );
         if !ui.is_rect_visible(cell) {
@@ -371,6 +445,27 @@ fn grid(
         item(
             ui, v, info, cell, icon, label, true, order, st, icons, out, result,
         );
+    }
+    if v.free.is_some() {
+        result.grid = Some(geom);
+        // Case visée pendant un glisser dans la boîte.
+        if result.dragging
+            && let Some(p) = ui.input(|i| i.pointer.hover_pos())
+            && area.contains(p)
+        {
+            let at = geom.cell_at(p);
+            let target = Rect::from_min_size(
+                area.min + vec2(at.col as f32 * m.cell.x, at.row as f32 * m.cell.y),
+                m.cell,
+            )
+            .shrink(3.0);
+            ui.painter().rect_stroke(
+                target,
+                CornerRadius::same(10),
+                Stroke::new(1.5, theme::ACCENT_2),
+                StrokeKind::Inside,
+            );
+        }
     }
 }
 
@@ -500,10 +595,13 @@ fn item(
                 ClickMods::default(),
             );
         }
-        out.push(Action::StartDrag {
-            b: v.b,
-            names: ordered_selection(&st.selected, order),
-        });
+        // L'élément saisi d'abord : c'est lui qui se pose sur la case visée.
+        let mut names = ordered_selection(&st.selected, order);
+        if let Some(i) = names.iter().position(|n| n == name) {
+            let grabbed = names.remove(i);
+            names.insert(0, grabbed);
+        }
+        out.push(Action::StartDrag { b: v.b, names });
     }
     if resp.dragged() {
         result.dragging = true;

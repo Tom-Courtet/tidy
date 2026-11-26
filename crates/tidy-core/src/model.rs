@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::geometry::{Rect, Size};
+use crate::grid::Cell;
 use crate::rules::Rule;
 use crate::screen::{Screen, ScreenId, ScreenSetKey};
 use crate::store::Versioned;
@@ -225,6 +226,10 @@ pub struct Tab {
     pub name: String,
     /// Éléments, dans l'ordre manuel.
     pub items: Vec<ItemRef>,
+    /// Grille libre (ordre manuel, vue en grille) : case choisie pour un élément. Les
+    /// éléments sans case prennent les premières cases libres ([`crate::grid`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cells: BTreeMap<ItemRef, Cell>,
 }
 
 impl Tab {
@@ -233,7 +238,14 @@ impl Tab {
             id: TabId::new(),
             name: name.into(),
             items: Vec::new(),
+            cells: BTreeMap::new(),
         }
+    }
+
+    /// Oublie les cases des éléments qui ne sont plus dans l'onglet.
+    pub fn prune_cells(&mut self) {
+        let items = &self.items;
+        self.cells.retain(|item, _| items.contains(item));
     }
 }
 

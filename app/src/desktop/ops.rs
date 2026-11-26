@@ -88,6 +88,9 @@ pub fn rename_item(state: &mut DesktopState, old: &str, new: &str) {
     for b in &mut state.boxes {
         for tab in &mut b.tabs {
             tab.items.iter_mut().for_each(rename);
+            if let Some(cell) = tab.cells.remove(&ItemRef(old.to_owned())) {
+                tab.cells.insert(ItemRef(new.to_owned()), cell);
+            }
         }
     }
     state.unassigned.iter_mut().for_each(rename);

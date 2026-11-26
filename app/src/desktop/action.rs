@@ -95,6 +95,10 @@ pub enum Action {
         b: BoxId,
         view: ViewMode,
     },
+    /// Grille libre : supprimer les cases vides (les éléments se suivent à nouveau).
+    CompactGrid {
+        b: BoxId,
+    },
     SetIconSize {
         b: BoxId,
         size: f32,

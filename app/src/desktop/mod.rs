@@ -54,7 +54,7 @@ use tidy_ui::t;
 use crate::ipc::{self, Request, Response};
 use action::Action;
 use boxwin::{BoxUi, BoxView, NameEdit, PortalView, TITLE_HEIGHT};
-use items::{ItemDir, RenameEdit, Section};
+use items::{GridGeom, ItemDir, RenameEdit, Section};
 use overlay::{Overlay, PopupKind};
 use portal::{DirWatcher, Portal, PortalRefusal};
 
@@ -284,6 +284,8 @@ struct BoxWindow {
     ui: BoxUi,
     sections: Vec<Section>,
     sections_key: (u64, u64),
+    /// Grille libre affichée, en coordonnées globales (case visée par un dépôt).
+    grid: Option<GridGeom>,
 }
 
 impl BoxWindow {
@@ -489,6 +491,7 @@ impl Desktop {
                     ui: BoxUi::default(),
                     sections: Vec::new(),
                     sections_key: (u64::MAX, u64::MAX),
+                    grid: None,
                 }
             });
             if let BoxKind::Portal { path } = &b.kind {
@@ -513,6 +516,9 @@ impl Desktop {
     /// masquer ou à rendre).
     fn save(&mut self, content: bool) {
         self.generation += 1;
+        for tab in self.state.boxes.iter_mut().flat_map(|b| b.tabs.iter_mut()) {
+            tab.prune_cells();
+        }
         if let Err(e) = self.store.save(&self.state) {
             log::error!("disposition non enregistrée : {e:#}");
         }
@@ -1121,6 +1127,12 @@ impl Desktop {
                 self.edit_box(b, |x| x.sort.group_by_date = !x.sort.group_by_date);
             }
             Action::SetView { b, view } => self.edit_box(b, |x| x.view = view),
+            Action::CompactGrid { b } => self.edit_box(b, |x| {
+                let tab = x.active_tab.min(x.tabs.len().saturating_sub(1));
+                if let Some(t) = x.tabs.get_mut(tab) {
+                    t.cells.clear();
+                }
+            }),
             Action::SetIconSize { b, size } => {
                 let default = self.settings.default_appearance.clone();
                 self.edit_box(b, |x| {
@@ -1320,6 +1332,33 @@ impl Desktop {
         self.rescan_dir_of(b);
     }
 
+    /// Grille libre de la boîte `b` : pose `names` sur la case sous la souris. Rend
+    /// `false` si la boîte n'a pas de grille libre affichée.
+    fn place_at_mouse(&mut self, b: BoxId, names: &[String]) -> bool {
+        let Some(win) = self.windows.get(&b) else {
+            return false;
+        };
+        let Some(geom) = win.grid else {
+            return false;
+        };
+        let target = geom.cell_at(mouse_pos());
+        let shown: Vec<String> = win
+            .sections
+            .iter()
+            .flat_map(|s| s.items.iter().map(|i| i.name.clone()))
+            .collect();
+        let Some(x) = self.state.find_box_mut(b) else {
+            return false;
+        };
+        if items::free_grid(x).is_none() {
+            return false;
+        }
+        let tab = x.active_tab.min(x.tabs.len().saturating_sub(1));
+        let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
+        tidy_core::grid::place(&mut x.tabs[tab].cells, &shown, geom.columns, names, target);
+        true
+    }
+
     /// Fichiers déposés dans une boîte. Ceux du bureau y sont rangés ; ceux venus
     /// d'ailleurs ne sont ni copiés ni déplacés (aucun fichier ne bouge).
     fn drop_files(&mut self, b: BoxId, paths: &[PathBuf], before: Option<String>) {
@@ -1342,6 +1381,7 @@ impl Desktop {
             let manual = x.sort.key == SortKey::Manual && !x.sort.group_by_date;
             let before = before.filter(|n| manual && !names.contains(n));
             ops::assign_to_tab(&mut self.state, &names, b, tab, before.as_deref());
+            self.place_at_mouse(b, &names);
             self.save(true);
             self.rescan_desktop();
         }
@@ -1363,6 +1403,11 @@ impl Desktop {
                 if drag.portal {
                     return;
                 }
+                if self.place_at_mouse(from, &drag.names) {
+                    self.save(false);
+                    self.generation += 1;
+                    return;
+                }
                 let Some(x) = self.state.find_box_mut(from) else {
                     return;
                 };
@@ -1382,6 +1427,7 @@ impl Desktop {
                 }
                 let tab = self.state.find_box(to).map_or(0, |x| x.active_tab);
                 ops::assign_to_tab(&mut self.state, &drag.names, to, tab, None);
+                self.place_at_mouse(to, &drag.names);
                 self.save(true);
             }
             None => {
@@ -1624,6 +1670,10 @@ impl eframe::App for Desktop {
             });
             drop(view);
             win.sections = sections;
+            win.grid = res
+                .grid
+                .zip(outer)
+                .map(|(g, o)| g.translated(o.min.to_vec2()));
             pressed |= res.pressed;
             released |= res.released;
             if res.hovered {
@@ -1761,6 +1811,7 @@ mod tests {
             ui: BoxUi::default(),
             sections: Vec::new(),
             sections_key: (0, 0),
+            grid: None,
         };
         assert_eq!(
             win.shown(&[]),

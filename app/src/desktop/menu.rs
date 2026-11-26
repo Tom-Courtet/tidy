@@ -262,6 +262,14 @@ pub fn box_menu(b: &DeskBox, page: Page, others: &[(BoxId, String)], icon_size: 
                     Action::SetSort { b: id, key },
                 ));
             }
+            // Grille libre : revenir à des éléments qui se suivent.
+            if super::items::free_grid(b).is_some_and(|cells| !cells.is_empty()) {
+                e.push(item(
+                    icons::GRID,
+                    t!("box.compact_grid"),
+                    EntryKind::Do(Action::CompactGrid { b: id }),
+                ));
+            }
             e.push(Entry::Separator);
             e.push(check(
                 icons::CHEVRON_DOWN,

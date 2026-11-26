@@ -16,7 +16,7 @@ use tidy_core::model::{Appearance, DeskBox, Rgba, TitleVisibility};
 use tidy_ui::{icons, t, theme, widgets};
 
 use super::action::Action;
-use super::items::{self, ItemDir, ItemsState, ItemsView, Section};
+use super::items::{self, GridGeom, ItemDir, ItemsState, ItemsView, Section};
 use super::textures::IconCache;
 
 /// Hauteur de la barre de titre.
@@ -100,6 +100,8 @@ pub struct BoxOutput {
     pub dragging: bool,
     /// Maj enfoncée (pour ignorer l'aimantation).
     pub shift: bool,
+    /// Grille libre affichée (repère de la fenêtre).
+    pub grid: Option<GridGeom>,
 }
 
 /// Bord ou coin sous `p`, s'il y en a un.
@@ -253,9 +255,11 @@ pub fn draw(
             dir,
             single_click: v.single_click,
             portal: v.portal.is_some(),
+            free: items::free_grid(b),
         };
         let r = items::show(&mut child, &view, &mut st.items, icons, out);
         result.dragging = r.dragging;
+        result.grid = r.grid;
         hovered_item = r.hovered;
     }
     // Fin d'un glisser interne : l'élément visé sert de point d'insertion.
