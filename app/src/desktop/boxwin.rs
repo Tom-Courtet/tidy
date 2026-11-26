@@ -214,11 +214,12 @@ pub fn draw(
         );
     }
 
-    // Recherche : fermée si l'option a été retirée ; Ctrl+F (⌘F) l'ouvre.
-    if !b.search_in_title {
+    // Recherche : fermée si l'option a été retirée, si la boîte est enroulée ou s'il
+    // n'y a pas de barre de titre pour l'afficher ; Ctrl+F (⌘F) l'ouvre.
+    let title_h = title_height(look, v.rolled);
+    if !b.search_in_title || title_h == 0.0 || v.rolled {
         st.search = None;
-    } else if !v.rolled
-        && st.renaming_title.is_none()
+    } else if st.renaming_title.is_none()
         && ctx.input(|i| i.viewport().focused.unwrap_or(false))
         && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::F))
     {
@@ -226,7 +227,6 @@ pub fn draw(
     }
 
     // Barre de titre.
-    let title_h = title_height(look, v.rolled);
     let title_rect = Rect::from_min_size(rect.min, vec2(rect.width(), title_h));
     let show_title = match look.title_visibility {
         TitleVisibility::Always => true,
@@ -871,6 +871,161 @@ fn resize_edges(ctx: &egui::Context, rect: Rect, result: &BoxOutput, rolled: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::{Event, PointerButton, Pos2, RawInput};
+
+    /// Commandes de fenêtre demandées par une boîte quand on appuie en `from` puis
+    /// qu'on glisse jusqu'à `to`.
+    fn commands_for_drag(frozen: bool, from: Pos2, to: Pos2) -> Vec<ViewportCommand> {
+        let ctx = egui::Context::default();
+        let mut b = DeskBox::new("A");
+        b.frozen = frozen;
+        let look = Appearance::default();
+        let view = BoxView {
+            b: &b,
+            look: &look,
+            sections: &[],
+            dir: None,
+            portal: None,
+            rolled: false,
+            drop_target: false,
+            single_click: false,
+            glass: false,
+        };
+        let mut st = BoxUi::default();
+        let mut icons = IconCache::new(ctx.clone());
+        let press = |pressed| Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let frames = [
+            vec![Event::PointerMoved(from)],
+            vec![press(true)],
+            vec![Event::PointerMoved(from.lerp(to, 0.5))],
+            vec![Event::PointerMoved(to)],
+            vec![Event::PointerMoved(to), press(false)],
+        ];
+        let mut commands = Vec::new();
+        for events in frames {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(300.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                let mut out = Vec::new();
+                draw(ui, &view, &mut st, &mut icons, &mut out);
+            });
+            for viewport in output.viewport_output.values() {
+                commands.extend(viewport.commands.iter().cloned());
+            }
+            output.drop_without_applying_deltas();
+        }
+        commands
+    }
+
+    /// Éléments sélectionnés par Ctrl+A (⌘A) dans une boîte qui affiche `names`, avec
+    /// `search` tapé dans la barre de titre.
+    fn select_all_with_search(view_mode: tidy_core::model::ViewMode, search: &str) -> Vec<String> {
+        use tidy_core::category::Category;
+        use tidy_core::rules::ItemInfo;
+        let ctx = egui::Context::default();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = ItemDir::plain(dir.path().to_path_buf());
+        let mut b = DeskBox::new("A");
+        b.search_in_title = true;
+        b.view = view_mode;
+        let names = ["Été 2026.jpg", "notes.txt", "ETE.pdf", "budget.xlsx"];
+        let info = |name: &str| ItemInfo {
+            name: name.into(),
+            is_dir: false,
+            category: Category::Other,
+            size: 0,
+            modified: None,
+            uti: None,
+        };
+        let sections = [Section {
+            group: None,
+            items: names.iter().map(|n| info(n)).collect(),
+        }];
+        let look = Appearance::default();
+        let view = BoxView {
+            b: &b,
+            look: &look,
+            sections: &sections,
+            dir: Some(&dir),
+            portal: None,
+            rolled: false,
+            drop_target: false,
+            single_click: false,
+            glass: false,
+        };
+        let mut st = BoxUi {
+            search: Some(SearchEdit {
+                text: search.into(),
+                focus: false,
+            }),
+            ..Default::default()
+        };
+        let mut icons = IconCache::new(ctx.clone());
+        let mut input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+            events: vec![Event::Key {
+                key: Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            }],
+            ..Default::default()
+        };
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(true);
+        let output = ctx.run_ui(input, |ui| {
+            let mut out = Vec::new();
+            draw(ui, &view, &mut st, &mut icons, &mut out);
+        });
+        output.drop_without_applying_deltas();
+        st.items.selected.into_iter().collect()
+    }
+
+    #[test]
+    fn search_shows_only_matching_items() {
+        use tidy_core::model::ViewMode;
+        // Grille libre (ordre manuel), liste : seuls les éléments qui correspondent,
+        // sans tenir compte de la casse ni des accents, sont affichés et sélectionnés.
+        for mode in [ViewMode::Grid, ViewMode::List] {
+            assert_eq!(
+                select_all_with_search(mode, "ete"),
+                ["ETE.pdf", "Été 2026.jpg"],
+                "{mode:?}"
+            );
+            assert_eq!(select_all_with_search(mode, "  ").len(), 4, "{mode:?}");
+            assert!(select_all_with_search(mode, "zzz").is_empty(), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_frozen_box_neither_moves_nor_resizes() {
+        let title = (pos2(150.0, 16.0), pos2(220.0, 60.0));
+        let edge = (pos2(2.0, 100.0), pos2(-40.0, 100.0));
+        let moves = |c: &[ViewportCommand]| c.contains(&ViewportCommand::StartDrag);
+        let resizes = |c: &[ViewportCommand]| {
+            c.iter()
+                .any(|c| matches!(c, ViewportCommand::BeginResize(_)))
+        };
+        // Boîte ordinaire : la barre de titre déplace, le bord redimensionne.
+        assert!(moves(&commands_for_drag(false, title.0, title.1)));
+        assert!(resizes(&commands_for_drag(false, edge.0, edge.1)));
+        // Gelée : ni l'un ni l'autre.
+        assert!(!moves(&commands_for_drag(true, title.0, title.1)));
+        let at_edge = commands_for_drag(true, edge.0, edge.1);
+        assert!(!resizes(&at_edge) && !moves(&at_edge));
+    }
 
     #[test]
     fn edges_and_corners() {
