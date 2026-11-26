@@ -35,6 +35,8 @@ use winit::window::WindowId;
 
 use crate::ipc::{self, Request, Response, Status};
 use hotkeys::{Action, Hotkeys};
+#[cfg(test)]
+pub(crate) use supervisor::desktop_quit_event;
 use supervisor::{Command, Shared, Supervisor};
 use tray::{MenuChoice, Tray, TrayView};
 

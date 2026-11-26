@@ -89,7 +89,9 @@ pub fn run(store: Store) -> Result<()> {
     let with_agent = match ipc::subscribe(
         &store,
         move |event| {
-            if event == Event::Shutdown {
+            // Arrêt de l'agent, ou boîtes désactivées : la boîte privée est verrouillée
+            // avant de sortir (l'agent attend, puis tue le bureau s'il traîne).
+            if event == Event::Shutdown || is_quit_request(&event) {
                 vault::lock_before_exit();
                 std::process::exit(0);
             }
@@ -161,6 +163,11 @@ pub fn run(store: Store) -> Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("bureau : {e}"))
+}
+
+/// Demande d'arrêt du bureau par l'agent (boîtes désactivées).
+fn is_quit_request(event: &Event) -> bool {
+    matches!(event, Event::Module { module, action, .. } if module == "desktop" && action == "quit")
 }
 
 /// État du bureau au démarrage. Le bureau est le seul écrivain de `desktop.json` :
@@ -1898,6 +1905,14 @@ impl eframe::App for Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// L'agent demande l'arrêt du bureau (boîtes désactivées) par un message que le
+    /// bureau reconnaît.
+    #[test]
+    fn the_agent_quit_request_is_recognised() {
+        assert!(is_quit_request(&crate::agent::desktop_quit_event()));
+        assert!(!is_quit_request(&Event::DesktopChanged));
+    }
 
     #[test]
     fn only_desktop_items_are_boxed() {

@@ -33,6 +33,19 @@ const POLL: Duration = Duration::from_millis(500);
 /// modifiés, effacement des copies en clair ; jusqu'à 10 s) avant d'être tué.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(11);
 
+/// Action du message (module « desktop ») qui demande au bureau de s'arrêter de
+/// lui-même (boîtes désactivées) : il verrouille la boîte privée puis sort.
+pub const DESKTOP_QUIT: &str = "quit";
+
+/// Message qui demande au processus du bureau de s'arrêter (voir [`DESKTOP_QUIT`]).
+pub fn desktop_quit_event() -> tidy_core::events::Event {
+    tidy_core::events::Event::Module {
+        module: "desktop".into(),
+        action: DESKTOP_QUIT.into(),
+        data: serde_json::Value::Null,
+    }
+}
+
 pub enum Command {
     /// Appliquer un mode (démarrage, changement de réglage).
     Apply(DesktopMode),
@@ -150,7 +163,10 @@ impl Worker {
         self.crashes.clear();
         match mode {
             DesktopMode::Off => {
-                self.stop_child();
+                // Le bureau verrouille d'abord la boîte privée (rechiffrement des
+                // fichiers ouverts modifiés, effacement des copies en clair), comme à
+                // l'arrêt de l'agent ; il n'est tué qu'ensuite.
+                self.quit_child();
                 self.restore_finder();
                 // Plus de boîtes à l'écran : les icônes rangées reviennent sur le
                 // bureau du système (Windows).
@@ -189,6 +205,17 @@ impl Worker {
             }
             Err(e) => log::error!("lancement du bureau impossible : {e}"),
         }
+    }
+
+    /// Demande au bureau de s'arrêter de lui-même ([`DESKTOP_QUIT`]), attend au plus
+    /// [`SHUTDOWN_GRACE`], puis l'arrête de force s'il tourne encore.
+    fn quit_child(&mut self) {
+        if self.child.is_some() {
+            log::info!("arrêt du bureau demandé");
+            self.bus.publish(desktop_quit_event());
+            self.wait_child(SHUTDOWN_GRACE);
+        }
+        self.stop_child();
     }
 
     /// Attend au plus `limit` que le bureau s'arrête de lui-même.
