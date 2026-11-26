@@ -389,7 +389,13 @@ impl Manager {
                 }
                 Event::SettingsChanged => {
                     if !self.settings_dirty {
-                        self.settings = self.store.load();
+                        // Fichier illisible un instant : garder les réglages affichés
+                        // (des valeurs par défaut seraient réenregistrées au prochain
+                        // changement).
+                        match self.store.load_checked() {
+                            Ok(settings) => self.settings = settings,
+                            Err(e) => log::warn!("{e:#} : réglages affichés gardés"),
+                        }
                         crate::lang::apply(self.settings.language);
                     }
                 }
