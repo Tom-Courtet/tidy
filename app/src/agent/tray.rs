@@ -15,6 +15,8 @@ pub struct TrayView {
     pub desktop_hidden: bool,
     /// Dispositions nommées (sous-menu « Dispositions »).
     pub layouts: Vec<(Uuid, String)>,
+    /// La playlist des fonds d'écran tourne : « Fond d'écran suivant » est actif.
+    pub wallpaper_playlist: bool,
 }
 
 /// Choix fait dans le menu.
@@ -28,6 +30,16 @@ pub enum MenuChoice {
     RestorePreviousLayout,
     ApplyLayout(Uuid),
     OpenLayouts,
+    /// Lanceur de recherche (lot K).
+    Search,
+    /// Page Widgets de la fenêtre principale.
+    OpenWidgets,
+    /// Fond suivant de la playlist.
+    NextWallpaper,
+    /// Page Fonds d'écran de la fenêtre principale.
+    OpenWallpapers,
+    /// Verrouiller la boîte privée.
+    LockVault,
 }
 
 const OPEN_ID: &str = "open";
@@ -36,6 +48,11 @@ const DESKTOP_ID: &str = "desktop";
 const QUIT_ID: &str = "quit";
 const RESTORE_LAYOUT_ID: &str = "layouts-restore";
 const OPEN_LAYOUTS_ID: &str = "layouts-open";
+const SEARCH_ID: &str = "search";
+const WIDGETS_ID: &str = "widgets";
+const NEXT_WALLPAPER_ID: &str = "wallpaper-next";
+const WALLPAPERS_ID: &str = "wallpapers";
+const LOCK_VAULT_ID: &str = "vault-lock";
 /// Préfixe des dispositions nommées, suivi de leur identifiant.
 const LAYOUT_PREFIX: &str = "layout:";
 
@@ -47,6 +64,11 @@ fn parse_menu_id(id: &str) -> Option<MenuChoice> {
         QUIT_ID => Some(MenuChoice::Quit),
         RESTORE_LAYOUT_ID => Some(MenuChoice::RestorePreviousLayout),
         OPEN_LAYOUTS_ID => Some(MenuChoice::OpenLayouts),
+        SEARCH_ID => Some(MenuChoice::Search),
+        WIDGETS_ID => Some(MenuChoice::OpenWidgets),
+        NEXT_WALLPAPER_ID => Some(MenuChoice::NextWallpaper),
+        WALLPAPERS_ID => Some(MenuChoice::OpenWallpapers),
+        LOCK_VAULT_ID => Some(MenuChoice::LockVault),
         _ => id
             .strip_prefix(LAYOUT_PREFIX)
             .and_then(|id| Uuid::parse_str(id).ok())
@@ -107,6 +129,7 @@ impl Tray {
         };
         menu.append_items(&[
             &MenuItem::with_id(OPEN_ID, t!("tray.open"), true, None),
+            &MenuItem::with_id(SEARCH_ID, t!("tray.search"), true, None),
             &PredefinedMenuItem::separator(),
             &CheckMenuItem::with_id(
                 BOXES_ID,
@@ -117,6 +140,17 @@ impl Tray {
             ),
             &MenuItem::with_id(DESKTOP_ID, desktop_label, view.boxes_enabled, None),
             &layouts_menu(view)?,
+            &MenuItem::with_id(
+                LOCK_VAULT_ID,
+                t!("finish.tray_lock_vault"),
+                // Toujours proposé avec les boîtes : sans coffre ouvert, sans effet
+                // (le coffre peut être créé après la construction du menu).
+                view.boxes_enabled,
+                None,
+            ),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(WIDGETS_ID, t!("finish.tray_widgets"), true, None),
+            &wallpaper_menu(view)?,
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id(QUIT_ID, t!("tray.quit"), true, None),
         ])?;
@@ -147,6 +181,24 @@ fn layouts_menu(view: &TrayView) -> Result<Submenu> {
     menu.append(&MenuItem::with_id(
         OPEN_LAYOUTS_ID,
         t!("layouts.tray_manage"),
+        true,
+        None,
+    ))?;
+    Ok(menu)
+}
+
+/// Sous-menu « Fonds d'écran » : fond suivant de la playlist, gérer.
+fn wallpaper_menu(view: &TrayView) -> Result<Submenu> {
+    let menu = Submenu::new(t!("finish.tray_wallpapers"), true);
+    menu.append(&MenuItem::with_id(
+        NEXT_WALLPAPER_ID,
+        t!("finish.tray_next_wallpaper"),
+        view.wallpaper_playlist,
+        None,
+    ))?;
+    menu.append(&MenuItem::with_id(
+        WALLPAPERS_ID,
+        t!("finish.tray_manage_wallpapers"),
         true,
         None,
     ))?;
@@ -220,6 +272,11 @@ mod tests {
             (QUIT_ID, MenuChoice::Quit),
             (RESTORE_LAYOUT_ID, MenuChoice::RestorePreviousLayout),
             (OPEN_LAYOUTS_ID, MenuChoice::OpenLayouts),
+            (SEARCH_ID, MenuChoice::Search),
+            (WIDGETS_ID, MenuChoice::OpenWidgets),
+            (NEXT_WALLPAPER_ID, MenuChoice::NextWallpaper),
+            (WALLPAPERS_ID, MenuChoice::OpenWallpapers),
+            (LOCK_VAULT_ID, MenuChoice::LockVault),
         ] {
             assert_eq!(parse_menu_id(id), Some(choice));
         }
