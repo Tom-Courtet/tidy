@@ -19,12 +19,12 @@ use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     BHID_DataObject, BHID_SFUIObject, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
     CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX,
-    IContextMenu, IContextMenu2, IContextMenu3, IShellItemArray, IShellItemImageFactory,
+    GCS_VERBW, IContextMenu, IContextMenu2, IContextMenu3, IShellItemArray, IShellItemImageFactory,
     SHCreateDataObject, SHCreateItemFromParsingName, SHCreateShellItemArrayFromIDLists,
     SHDoDragDrop, SHParseDisplayName, SIIGBF_ICONONLY, SIIGBF_RESIZETOFIT,
 };
 use windows::Win32::UI::WindowsAndMessaging::HMENU;
-use windows::core::{Interface, PCSTR, PCWSTR};
+use windows::core::{Interface, PCSTR, PCWSTR, PSTR};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
     GetObjectW, HBITMAP, ReleaseDC, ScreenToClient,
@@ -330,10 +330,11 @@ pub fn show_menu(window_title: &str, paths: &[PathBuf]) -> Result<bool> {
     }
     let offset = (command as u32 - FIRST_COMMAND) as usize;
     let mut mask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
-    // État des touches au moment du choix, pas à l'ouverture du menu : Maj relâchée
-    // avant de cliquer « Supprimer » doit donner la corbeille, comme dans
-    // l'Explorateur (Maj transmise rend la suppression définitive).
-    if key_down(VK_SHIFT) {
+    // État des touches au moment du choix, pas à l'ouverture du menu. Jamais Maj pour
+    // « Supprimer » : Maj transmise rendrait la suppression définitive ; Tidy ne passe
+    // que par la corbeille.
+    let delete = verb_of(&menu, offset).is_some_and(|v| is_delete_verb(&v));
+    if key_down(VK_SHIFT) && !delete {
         mask |= CMIC_MASK_SHIFT_DOWN;
     }
     if key_down(VK_CONTROL) {
@@ -363,6 +364,30 @@ pub fn show_menu(window_title: &str, paths: &[PathBuf]) -> Result<bool> {
         Err(e) => Err(e).context("commande du menu du Shell"),
         Ok(()) => Ok(true),
     }
+}
+
+/// Verbe (nom stable, comme « delete ») de la commande n° `offset` du menu, s'il en a.
+fn verb_of(menu: &IContextMenu, offset: usize) -> Option<String> {
+    let mut buf = [0u16; 64];
+    // SAFETY: tampon local de `buf.len()` caractères UTF-16 ; avec GCS_VERBW, le Shell
+    // y écrit une chaîne terminée par un zéro (le type PSTR est celui de l'API).
+    unsafe {
+        menu.GetCommandString(
+            offset,
+            GCS_VERBW,
+            None,
+            PSTR(buf.as_mut_ptr().cast()),
+            buf.len() as u32,
+        )
+    }
+    .ok()?;
+    let len = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
+}
+
+/// Verbe de suppression du Shell (corbeille, ou définitive avec Maj).
+fn is_delete_verb(verb: &str) -> bool {
+    verb.eq_ignore_ascii_case("delete")
 }
 
 // --- Glisser-déposer ------------------------------------------------------------
@@ -423,4 +448,17 @@ pub fn start_drag(window_title: &str, paths: &[PathBuf]) -> Result<bool> {
     let effect = result.context("glisser-déposer du Shell")?;
     log::debug!("glisser-déposer terminé (effet {})", effect.0);
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_verb_is_recognised() {
+        assert!(is_delete_verb("delete"));
+        assert!(is_delete_verb("Delete"));
+        assert!(!is_delete_verb("rename"));
+        assert!(!is_delete_verb("cut"));
+    }
 }
