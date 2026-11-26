@@ -10,6 +10,8 @@
 //! Un widget ne touche ni au réseau ni au disque dans `ui` : les accès longs passent
 //! par un fil à lui (voir les widgets de `tidy-integrations`).
 
+pub mod search_mini;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -85,7 +87,7 @@ pub struct WidgetKind {
 /// Tous les types de widgets, dans l'ordre du catalogue. Chaque lot ajoute ici les
 /// siens (une ligne par widget).
 pub fn kinds() -> Vec<WidgetKind> {
-    vec![]
+    vec![search_mini::kind()]
 }
 
 /// Type de widget d'après sa clé.
