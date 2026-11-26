@@ -60,6 +60,12 @@ windows-sys = "0.61"
 windows = { version = "0.62.2", default-features = false }
 # Surveillance du dossier du bureau (agent, lot A).
 notify = "9.0.0"
+# Réseau des widgets Météo, Calendrier et Chat IA (lot I) : TLS du système (schannel
+# sous Windows, Security.framework sous macOS), sans OpenSSL ni runtime async, comme Soundy.
+ureq = { version = "3.5.2", default-features = false, features = ["native-tls-no-default"] }
+# Clé de l'API Claude dans le gestionnaire d'identifiants du système (Windows) ou le
+# trousseau (macOS), jamais dans `config.json` (lot I). MIT ou Apache-2.0.
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
 
 [profile.release]
 opt-level = "s"
