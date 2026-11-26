@@ -18,6 +18,7 @@ mod organization;
 mod pages;
 mod quick_actions;
 mod report;
+mod search;
 mod shortcuts;
 
 use std::collections::{BTreeSet, HashMap};
