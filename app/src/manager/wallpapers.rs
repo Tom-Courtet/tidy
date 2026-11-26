@@ -47,6 +47,7 @@ struct AgentStatus {
     gave_up: bool,
     paused: Option<PauseReason>,
     original_saved: bool,
+    original_missing: bool,
     next_in: Option<u64>,
     error: Option<String>,
 }
@@ -359,6 +360,15 @@ fn overview(m: &mut Manager, st: &mut PageState, ui: &mut Ui) {
                     theme::WARNING,
                     icons::WARNING,
                     t!("wallpapers.status_gave_up"),
+                );
+            }
+            if s.original_missing && m.settings.wallpaper.enabled {
+                ui.add_space(6.0);
+                widgets::notice(
+                    ui,
+                    theme::WARNING,
+                    icons::WARNING,
+                    t!("wallpapers.status_original_missing"),
                 );
             }
             if let Some(error) = &s.error {
