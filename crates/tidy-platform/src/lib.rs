@@ -152,6 +152,11 @@ pub trait DesktopPlatform: Send + Sync {
         false
     }
 
+    /// Cesse de surveiller les clics sur le bureau (double-clic, rectangle) : à appeler
+    /// avant une attente longue du thread principal (arrêt). Windows : le crochet souris
+    /// global est retiré (un crochet qui ne répond plus ralentit toute la souris).
+    fn stop_desktop_watch(&self) {}
+
     /// Accès rapide : passe la fenêtre `title` au-dessus des applis (`true`) ou la
     /// remet au niveau du bureau (`false`).
     fn raise_desktop_surface(&self, _title: &str, _raised: bool) {}

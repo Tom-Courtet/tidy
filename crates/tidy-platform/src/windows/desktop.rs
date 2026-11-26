@@ -30,7 +30,7 @@
 
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -39,9 +39,9 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, EnumWindows, FindWindowExW, FindWindowW, GetClassNameW, GetParent,
-    GetSystemMetrics, IsWindowVisible, MSLLHOOKSTRUCT, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
+    GetSystemMetrics, HHOOK, IsWindowVisible, MSLLHOOKSTRUCT, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
     SMTO_ABORTIFHUNG, SW_HIDE, SW_SHOW, SendMessageTimeoutW, SetWindowsHookExW, ShowWindow,
-    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WindowFromPoint,
+    UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WindowFromPoint,
 };
 use windows_sys::core::BOOL;
 
@@ -307,6 +307,24 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
+/// Crochet souris installé (`HHOOK`), 0 sinon ou une fois retiré.
+static HOOK: AtomicUsize = AtomicUsize::new(0);
+
+/// Retire le crochet souris (avant une attente longue du thread qui le porte, comme
+/// l'arrêt de l'agent) : un crochet bas niveau qui ne répond plus ralentit la souris
+/// de toute la session. Il n'est pas réinstallé.
+pub fn unhook() {
+    let hook = HOOK.swap(0, Ordering::SeqCst);
+    if hook != 0 {
+        // SAFETY: crochet rendu par `SetWindowsHookExW` dans ce processus ; le `swap`
+        // garantit qu'il n'est retiré qu'une fois.
+        let ok = unsafe { UnhookWindowsHookEx(hook as HHOOK) };
+        if ok == 0 {
+            log::warn!("crochet souris non retiré");
+        }
+    }
+}
+
 /// Installe le crochet souris, une fois par processus.
 fn install_hook() -> bool {
     static INSTALLED: OnceLock<bool> = OnceLock::new();
@@ -325,6 +343,7 @@ fn install_hook() -> bool {
         if hook.is_null() {
             log::warn!("crochet souris refusé : ni double-clic ni rectangle sur le bureau");
         }
+        HOOK.store(hook as usize, Ordering::SeqCst);
         !hook.is_null()
     })
 }

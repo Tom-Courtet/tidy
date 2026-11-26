@@ -388,9 +388,12 @@ impl App {
 
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         log::info!("arrêt demandé");
+        let platform = tidy_platform::current();
+        // Avant toute attente (bureau, jusqu'à SHUTDOWN_GRACE ; Explorateur) : le
+        // crochet souris global porté par ce thread ne répondrait plus.
+        platform.stop_desktop_watch();
         self.bus.publish(Event::Shutdown);
         self.supervisor.shutdown();
-        let platform = tidy_platform::current();
         if platform.desktop_icons_hidden() {
             let _ = platform.set_desktop_icons_hidden(false);
         }

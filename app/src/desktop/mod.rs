@@ -221,7 +221,14 @@ struct Channels {
     /// Résultats de « Appliquer les règles ».
     replies: Receiver<String>,
     reply_tx: Sender<String>,
+    /// Mises à la corbeille finies (faites sur un autre fil : ce thread porte le
+    /// crochet souris du système).
+    trashed: Receiver<Trashed>,
+    trashed_tx: Sender<Trashed>,
 }
+
+/// Mise à la corbeille finie : boîte, noms, résultat.
+type Trashed = (BoxId, Vec<String>, Result<(), String>);
 
 impl Channels {
     /// Installe les rappels système. Sur le thread principal, boucle lancée.
@@ -252,6 +259,7 @@ impl Channels {
         let wake = ctx.clone();
         let hotkeys = hotkeys::BoxHotkeys::new(hot_tx, move || wake.request_repaint());
         let (reply_tx, replies) = mpsc::channel();
+        let (trashed_tx, trashed) = mpsc::channel();
         Self {
             drawn,
             hotkey,
@@ -259,6 +267,8 @@ impl Channels {
             hotkeys,
             replies,
             reply_tx,
+            trashed,
+            trashed_tx,
         }
     }
 }
@@ -735,6 +745,23 @@ impl Desktop {
             self.screens_changed(tidy_platform::current().screens());
             changed = true;
         }
+        // Mises à la corbeille finies.
+        while let Ok((b, names, result)) = self.channels.trashed.try_recv() {
+            match result {
+                Ok(()) => {
+                    if !self.is_portal(b) {
+                        ops::forget_items(&mut self.state, &names);
+                        self.save(true);
+                    }
+                    self.rescan_dir_of(b);
+                }
+                Err(e) => {
+                    log::warn!("corbeille : {e}");
+                    self.notice(b, t!("box.trash_failed"));
+                }
+            }
+            changed = true;
+        }
         // Rectangle tracé sur le bureau.
         while let Ok(rect) = self.channels.drawn.try_recv() {
             if rect.width >= 24.0 && rect.height >= 24.0 {
@@ -1146,19 +1173,17 @@ impl Desktop {
             Action::Trash { b, names } => {
                 let Some(dir) = self.dir_of(b) else { return };
                 let paths: Vec<PathBuf> = names.iter().map(|n| dir.join(n)).collect();
-                match platform.trash(&paths) {
-                    Ok(()) => {
-                        if !self.is_portal(b) {
-                            ops::forget_items(&mut self.state, &names);
-                            self.save(true);
-                        }
-                        self.rescan_dir_of(b);
-                    }
-                    Err(e) => {
-                        log::warn!("corbeille : {e:#}");
-                        self.notice(b, t!("box.trash_failed"));
-                    }
-                }
+                // Sur un autre fil : l'Explorateur peut prendre du temps, et ce thread
+                // porte le crochet souris du système (Windows).
+                let tx = self.channels.trashed_tx.clone();
+                let ctx = self.ctx.clone();
+                std::thread::spawn(move || {
+                    let result = tidy_platform::current()
+                        .trash(&paths)
+                        .map_err(|e| format!("{e:#}"));
+                    let _ = tx.send((b, names, result));
+                    ctx.request_repaint();
+                });
             }
             Action::CopyPath { b, names } => {
                 let Some(dir) = self.dir_of(b) else { return };
