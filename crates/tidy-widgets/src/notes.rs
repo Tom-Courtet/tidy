@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::mpsc::{self, Sender};
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::time::{Duration, Instant};
 
 use egui::{Color32, CornerRadius, RichText, Ui};
 use jiff::{Timestamp, ZonedDateTime};
@@ -171,38 +171,93 @@ pub fn list(data_dir: &Path) -> Vec<Note> {
     notes
 }
 
+/// Délai de regroupement des écritures d'une note.
+const WRITE_DELAY: Duration = Duration::from_millis(250);
+
+/// Travail du fil des écritures.
+enum Job {
+    Write(PathBuf, Note),
+    /// Écrire tout de suite ce qui attend, puis répondre.
+    Flush(SyncSender<()>),
+}
+
+/// Fil des écritures, lancé à la première note enregistrée.
+static WRITER: OnceLock<Option<Sender<Job>>> = OnceLock::new();
+
 /// Enregistre une note sur le fil des écritures : les écritures rapprochées d'une même
 /// note n'en font qu'une, environ 250 ms plus tard.
 pub fn queue_write(data_dir: &Path, note: &Note) {
-    static WRITER: OnceLock<Option<Sender<(PathBuf, Note)>>> = OnceLock::new();
     let writer = WRITER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(PathBuf, Note)>();
+        let (tx, rx) = mpsc::channel::<Job>();
         std::thread::Builder::new()
             .name("tidy-notes".into())
-            .spawn(move || {
-                while let Ok(first) = rx.recv() {
-                    let mut pending: HashMap<Uuid, (PathBuf, Note)> = HashMap::new();
-                    pending.insert(first.1.id, first);
-                    std::thread::sleep(Duration::from_millis(250));
-                    while let Ok(next) = rx.try_recv() {
-                        pending.insert(next.1.id, next);
-                    }
-                    for (data_dir, note) in pending.into_values() {
-                        if let Err(e) = save(&data_dir, &note) {
-                            log::error!("note {} non enregistrée : {e}", note.id);
-                        }
-                    }
-                }
-            })
+            .spawn(move || writer_loop(&rx))
             .inspect_err(|e| log::error!("fil des notes : {e}"))
             .ok()?;
         Some(tx)
     });
-    let sent = writer
-        .as_ref()
-        .is_some_and(|tx| tx.send((data_dir.to_path_buf(), note.clone())).is_ok());
+    let sent = writer.as_ref().is_some_and(|tx| {
+        tx.send(Job::Write(data_dir.to_path_buf(), note.clone()))
+            .is_ok()
+    });
     if !sent && let Err(e) = save(data_dir, note) {
         log::error!("note {} non enregistrée : {e}", note.id);
+    }
+}
+
+/// Écrit tout de suite les notes en attente (avant la fin du processus). Attend au
+/// plus 2 s.
+pub fn flush_writes() {
+    let Some(Some(tx)) = WRITER.get() else {
+        return;
+    };
+    let (ack_tx, ack) = mpsc::sync_channel(1);
+    if tx.send(Job::Flush(ack_tx)).is_ok() {
+        let _ = ack.recv_timeout(Duration::from_secs(2));
+    }
+}
+
+fn writer_loop(rx: &Receiver<Job>) {
+    let mut pending: HashMap<Uuid, (PathBuf, Note)> = HashMap::new();
+    let mut deadline: Option<Instant> = None;
+    loop {
+        let job = match deadline {
+            None => match rx.recv() {
+                Ok(job) => Some(job),
+                Err(_) => return,
+            },
+            Some(at) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                Ok(job) => Some(job),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => {
+                    write_all(&mut pending);
+                    return;
+                }
+            },
+        };
+        match job {
+            Some(Job::Write(data_dir, note)) => {
+                pending.insert(note.id, (data_dir, note));
+                deadline.get_or_insert_with(|| Instant::now() + WRITE_DELAY);
+            }
+            Some(Job::Flush(ack)) => {
+                write_all(&mut pending);
+                deadline = None;
+                let _ = ack.send(());
+            }
+            None => {
+                write_all(&mut pending);
+                deadline = None;
+            }
+        }
+    }
+}
+
+fn write_all(pending: &mut HashMap<Uuid, (PathBuf, Note)>) {
+    for (data_dir, note) in pending.drain().map(|(_, v)| v) {
+        if let Err(e) = save(&data_dir, &note) {
+            log::error!("note {} non enregistrée : {e}", note.id);
+        }
     }
 }
 
@@ -436,6 +491,17 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "note pas écrite");
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// Avant la fin du processus : ce qui attend est écrit tout de suite.
+    #[test]
+    fn flush_writes_pending_notes_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut note = Note::new(Uuid::new_v4());
+        note.text = "dernier mot".into();
+        queue_write(dir.path(), &note);
+        flush_writes();
+        assert_eq!(load(dir.path(), note.id).unwrap().text, "dernier mot");
     }
 
     #[test]

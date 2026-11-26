@@ -92,7 +92,7 @@ pub fn run(store: Store) -> Result<()> {
             // Arrêt de l'agent, ou boîtes désactivées : la boîte privée est verrouillée
             // avant de sortir (l'agent attend, puis tue le bureau s'il traîne).
             if event == Event::Shutdown || is_quit_request(&event) {
-                vault::lock_before_exit();
+                before_exit();
                 std::process::exit(0);
             }
             let _ = tx.send(event);
@@ -102,7 +102,7 @@ pub fn run(store: Store) -> Result<()> {
         },
         move || {
             log::warn!("l'agent a disparu : le bureau rend les icônes et s'arrête");
-            vault::lock_before_exit();
+            before_exit();
             restore_system_icons(&end_store);
             std::process::exit(0);
         },
@@ -163,6 +163,13 @@ pub fn run(store: Store) -> Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("bureau : {e}"))
+}
+
+/// Avant la fin du processus du bureau : notes en attente écrites, boîte privée
+/// verrouillée.
+fn before_exit() {
+    tidy_widgets::notes::flush_writes();
+    vault::lock_before_exit();
 }
 
 /// Demande d'arrêt du bureau par l'agent (boîtes désactivées).
