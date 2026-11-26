@@ -198,6 +198,19 @@ pub fn validate_new_name(dir: &Path, old: &str, new: &str) -> Result<PathBuf, Na
     if !same_file && std::fs::symlink_metadata(&target).is_ok() {
         return Err(NameError::Exists);
     }
+    // Changement de casse seulement : sur un volume sensible à la casse (APFS sensible,
+    // dossier Windows sensible à la casse), `Rapport` et `rapport` peuvent coexister,
+    // et le renommage écraserait l'autre fichier. On regarde les noms exacts.
+    if same_file
+        && new != old
+        && std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name() == std::ffi::OsStr::new(new))
+        })
+    {
+        return Err(NameError::Exists);
+    }
     Ok(target)
 }
 
@@ -348,5 +361,21 @@ mod tests {
         assert_eq!(validate_new_name(d, "a.txt", "c.txt"), Ok(d.join("c.txt")));
         // Changer la casse est permis.
         assert_eq!(validate_new_name(d, "a.txt", "A.txt"), Ok(d.join("A.txt")));
+    }
+
+    #[test]
+    fn case_change_never_overwrites_a_twin() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join("Rapport.txt"), b"1").unwrap();
+        std::fs::write(d.join("rapport.txt"), b"2").unwrap();
+        let twins = std::fs::read_dir(d).unwrap().count() == 2;
+        let result = validate_new_name(d, "Rapport.txt", "rapport.txt");
+        if twins {
+            // Volume sensible à la casse : deux fichiers distincts.
+            assert_eq!(result, Err(NameError::Exists));
+        } else {
+            assert_eq!(result, Ok(d.join("rapport.txt")));
+        }
     }
 }
