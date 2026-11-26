@@ -649,11 +649,24 @@ fn request_later(store: &Store, req: Request) {
         .name("tidy-widget-requête".into())
         .spawn(move || {
             if let Err(e) = ipc::request(&store, &req) {
-                log::warn!("requête d'un widget ({req:?}) : {e:#}");
+                // Le genre de requête seulement : ses données peuvent contenir une
+                // saisie de l'utilisateur (Search Mini).
+                log::warn!("requête d'un widget ({}) : {e:#}", request_kind(&req));
             }
         });
     if let Err(e) = spawned {
         log::warn!("fil de requête : {e}");
+    }
+}
+
+/// Genre d'une requête, pour le journal (jamais ses données).
+fn request_kind(req: &Request) -> String {
+    match req {
+        Request::Module { module, action, .. } => format!("{module}/{action}"),
+        other => serde_json::to_value(other)
+            .ok()
+            .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(str::to_owned))
+            .unwrap_or_default(),
     }
 }
 
@@ -1115,6 +1128,18 @@ mod tests {
                 assert!(!st.delete && !st.close);
             }
         }
+    }
+
+    /// Le journal ne garde pas la saisie de Search Mini.
+    #[test]
+    fn logged_requests_do_not_carry_user_input() {
+        let req = Request::Module {
+            module: "search".into(),
+            action: "open".into(),
+            data: serde_json::json!({ "query": "lettre de démission" }),
+        };
+        assert_eq!(request_kind(&req), "search/open");
+        assert_eq!(request_kind(&Request::Ping), "ping");
     }
 
     #[test]
