@@ -23,6 +23,8 @@ use tidy_core::settings::wallpaper::{Fit, OriginalWallpaper};
 
 mod convert;
 pub mod finder;
+mod fsops;
+pub use fsops::rename_no_replace;
 pub mod install;
 #[cfg(target_os = "macos")]
 mod macos;

@@ -1429,7 +1429,8 @@ impl Desktop {
             }
         };
         let source = dir.join(old);
-        if let Err(e) = std::fs::rename(&source, &target) {
+        // Jamais d'écrasement : un élément apparu sous ce nom entre-temps reste intact.
+        if let Err(e) = tidy_platform::rename_no_replace(&source, &target) {
             log::warn!("renommer {} : {e}", source.display());
             self.notice(b, t!("box.rename_failed"));
             return;

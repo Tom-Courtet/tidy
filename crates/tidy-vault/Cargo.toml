@@ -18,6 +18,8 @@ chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["
 zeroize = { version = "1.8", features = ["zeroize_derive"] }
 # Aléa du système (même version que `uuid`).
 getrandom = "0.4"
+# Dépôt final sans écrasement (`rename_no_replace`).
+tidy-platform.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

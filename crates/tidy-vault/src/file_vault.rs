@@ -951,8 +951,10 @@ impl VaultBackend for FileVault {
         let written = self
             .write_item(&key, name, &entries, &staging)
             .and_then(|()| {
+                // Jamais d'écrasement : un fichier apparu entre le choix du nom et le
+                // dépôt reste intact (le dépôt échoue, l'élément reste au coffre).
                 let target = fsx::unique_path(dest_dir, name, is_dir);
-                fs::rename(&staging, &target)
+                tidy_platform::rename_no_replace(&staging, &target)
                     .map(|()| target)
                     .map_err(VaultError::io("dépôt du fichier"))
             });
