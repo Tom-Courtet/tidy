@@ -13,14 +13,14 @@ use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::RemoteDesktop::{
-    NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification,
+    NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, PBT_APMSUSPEND,
-    RegisterClassExW, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE, WNDCLASSEXW, WS_EX_TOOLWINDOW,
-    WS_POPUP, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
+    RegisterClassExW, WM_DESTROY, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE, WNDCLASSEXW,
+    WS_EX_TOOLWINDOW, WS_POPUP, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
 };
 
 use super::wide;
@@ -57,6 +57,13 @@ unsafe extern "system" fn window_proc(
         // TRUE : on ne s'oppose à rien.
         return 1;
     }
+    if msg == WM_DESTROY {
+        // La fenêtre disparaît : elle ne doit plus être inscrite aux notifications de
+        // session (exigence de l'API).
+        // SAFETY: `hwnd` est la fenêtre inscrite par `watch_session`, encore valide
+        // pendant WM_DESTROY ; désinscrire une fenêtre non inscrite est sans effet.
+        unsafe { WTSUnRegisterSessionNotification(hwnd) };
+    }
     // SAFETY: traitement par défaut, mêmes arguments.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
@@ -69,8 +76,9 @@ pub fn watch_session(on_event: SessionCallback) -> bool {
     let class = wide("TidySessionWatch");
     let title = wide("Tidy · session");
     // SAFETY: classe et fenêtre de ce module ; les chaînes vivent pendant les appels.
-    // La fenêtre n'est jamais montrée et vit jusqu'à la fin du processus (la
-    // notification de session se désinscrit avec elle).
+    // La fenêtre n'est jamais montrée et vit en principe jusqu'à la fin du processus,
+    // dont le système retire alors l'inscription ; si elle est détruite avant,
+    // `window_proc` la désinscrit à WM_DESTROY (WTSUnRegisterSessionNotification).
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
         let wc = WNDCLASSEXW {

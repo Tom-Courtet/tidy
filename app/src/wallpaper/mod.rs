@@ -155,8 +155,10 @@ pub fn run(store: Store) -> Result<()> {
 
 /// Fenêtre d'un écran et son lecteur.
 struct Surface {
-    window: Window,
+    /// Avant `window` : le lecteur (qui dessine dans la fenêtre) s'arrête avant que la
+    /// fenêtre soit détruite (les champs sont libérés dans l'ordre).
     player: Option<Player>,
+    window: Window,
     frame: Rect,
     path: PathBuf,
 }
@@ -238,8 +240,8 @@ fn create_surface(
         wanted.path.display()
     );
     Ok(Surface {
-        window,
         player,
+        window,
         frame: f,
         path: wanted.path.clone(),
     })
