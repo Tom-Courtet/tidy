@@ -5,8 +5,9 @@
 //! la conversation ne vont dans les journaux.
 
 use std::fmt;
-use std::io::BufRead;
+use std::io::{self, BufRead, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -21,6 +22,8 @@ const API_VERSION: &str = "2023-06-01";
 const MAX_TOKENS: u32 = 64_000;
 /// Durée maximale d'une réponse complète.
 const STREAM_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Intervalle de vérification de l'arrêt demandé pendant l'attente du serveur.
+const CANCEL_POLL: Duration = Duration::from_millis(100);
 /// Modèles qui acceptent le repli côté serveur en cas de refus (`fallbacks`).
 const FALLBACK_MODELS: &[&str] = &[
     "claude-sonnet-5-5",
@@ -189,36 +192,153 @@ impl AiProvider for Claude {
             return Err(AiError::NoKey);
         }
         let (body, beta) = request_body(request);
-        let agent = net::agent(AgentOptions {
-            total: Some(STREAM_TIMEOUT),
-            status_as_response: true,
+        let key = self.api_key.trim().to_owned();
+        // Le réseau sur un fil à part : « Arrêter » rend la main tout de suite, même
+        // pendant l'attente de la réponse ou entre deux morceaux du flux. Le fil
+        // s'arrête au morceau suivant (le canal est fermé) et ferme la connexion.
+        let pieces = in_background(move |tx| {
+            let agent = net::agent(AgentOptions {
+                total: Some(STREAM_TIMEOUT),
+                status_as_response: true,
+            });
+            let mut call = agent
+                .post(API_URL)
+                .header("x-api-key", &key)
+                .header("anthropic-version", API_VERSION)
+                .header("content-type", "application/json")
+                .header("accept", "text/event-stream");
+            if let Some(beta) = beta {
+                call = call.header("anthropic-beta", beta);
+            }
+            let response = match call.send(body.to_string()) {
+                Ok(response) => response,
+                Err(e) => {
+                    let _ = tx.send(Piece::Failed(AiError::Net(e.into())));
+                    return;
+                }
+            };
+            let status = response.status().as_u16();
+            let mut body = response.into_body();
+            if status != 200 {
+                let text = body
+                    .with_config()
+                    .limit(64 * 1024)
+                    .read_to_string()
+                    .unwrap_or_default();
+                let _ = tx.send(Piece::Status(status, text));
+                return;
+            }
+            if tx.send(Piece::Status(status, String::new())).is_ok() {
+                pump(body.into_reader(), &tx);
+            }
         });
-        let mut call = agent
-            .post(API_URL)
-            .header("x-api-key", self.api_key.trim())
-            .header("anthropic-version", API_VERSION)
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream");
-        if let Some(beta) = beta {
-            call = call.header("anthropic-beta", beta);
+        match wait_piece(&pieces, cancel)? {
+            Piece::Status(200, _) => {}
+            Piece::Status(status, text) => {
+                let err = error_from_status(status, &text);
+                log::warn!("API Claude : HTTP {status} ({err})");
+                return Err(err);
+            }
+            Piece::Failed(e) => return Err(e),
+            Piece::Data(_) | Piece::ReadError(_) => return Err(AiError::Interrupted),
         }
-        let response = call
-            .send(body.to_string())
-            .map_err(|e| AiError::Net(e.into()))?;
-        let status = response.status().as_u16();
-        let mut body = response.into_body();
-        if status != 200 {
-            let text = body
-                .with_config()
-                .limit(64 * 1024)
-                .read_to_string()
-                .unwrap_or_default();
-            let err = error_from_status(status, &text);
-            log::warn!("API Claude : HTTP {status} ({err})");
-            return Err(err);
-        }
-        let reader = std::io::BufReader::new(body.into_reader());
+        let reader = io::BufReader::new(ChannelReader::new(pieces, cancel));
         read_stream(reader, cancel, on_text)
+    }
+}
+
+/// Ce que le fil du réseau rapporte.
+enum Piece {
+    /// Statut HTTP de la réponse, et son corps si ce n'est pas 200.
+    Status(u16, String),
+    Failed(AiError),
+    /// Morceau du corps de la réponse.
+    Data(Vec<u8>),
+    ReadError(io::Error),
+}
+
+/// Lance `work` sur un fil à part ; ses morceaux arrivent sur le canal rendu.
+fn in_background(work: impl FnOnce(mpsc::Sender<Piece>) + Send + 'static) -> Receiver<Piece> {
+    let (tx, rx) = mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("chat-ia-réseau".into())
+        .spawn(move || work(tx));
+    if let Err(e) = spawned {
+        log::error!("fil du réseau du chat impossible : {e}");
+    }
+    rx
+}
+
+/// Recopie `reader` sur le canal, jusqu'à la fin, une erreur, ou la fermeture du
+/// canal (arrêt demandé : la connexion est alors relâchée).
+fn pump(mut reader: impl Read, tx: &mpsc::Sender<Piece>) {
+    let mut buf = [0u8; 8192];
+    loop {
+        let piece = match reader.read(&mut buf) {
+            Ok(0) => return,
+            Ok(n) => Piece::Data(buf[..n].to_vec()),
+            Err(e) => Piece::ReadError(e),
+        };
+        let last = matches!(piece, Piece::ReadError(_));
+        if tx.send(piece).is_err() || last {
+            return;
+        }
+    }
+}
+
+/// Attend le prochain morceau en surveillant l'arrêt demandé.
+fn wait_piece(rx: &Receiver<Piece>, cancel: &AtomicBool) -> Result<Piece, AiError> {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(AiError::Cancelled);
+        }
+        match rx.recv_timeout(CANCEL_POLL) {
+            Ok(piece) => return Ok(piece),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Err(AiError::Interrupted),
+        }
+    }
+}
+
+/// Corps de la réponse lu depuis le fil du réseau ; une lecture rend la main dès que
+/// l'arrêt est demandé (erreur), sans attendre le serveur.
+struct ChannelReader<'a> {
+    rx: Receiver<Piece>,
+    cancel: &'a AtomicBool,
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl<'a> ChannelReader<'a> {
+    fn new(rx: Receiver<Piece>, cancel: &'a AtomicBool) -> Self {
+        Self {
+            rx,
+            cancel,
+            buf: Vec::new(),
+            pos: 0,
+        }
+    }
+}
+
+impl Read for ChannelReader<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        while self.pos >= self.buf.len() {
+            match wait_piece(&self.rx, self.cancel) {
+                Ok(Piece::Data(data)) => {
+                    self.buf = data;
+                    self.pos = 0;
+                }
+                Ok(Piece::ReadError(e)) => return Err(e),
+                Ok(_) => {}
+                // Pas `Interrupted` : `read_line` réessaierait.
+                Err(AiError::Cancelled) => return Err(io::Error::other("arrêt demandé")),
+                Err(_) => return Ok(0),
+            }
+        }
+        let n = out.len().min(self.buf.len() - self.pos);
+        out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
     }
 }
 
@@ -283,6 +403,7 @@ pub fn read_stream(
         match reader.read_line(&mut line) {
             Ok(0) => return Err(AiError::Interrupted),
             Ok(_) => {}
+            Err(_) if cancel.load(Ordering::Relaxed) => return Err(AiError::Cancelled),
             Err(e) => {
                 log::warn!("flux Claude coupé : {}", net::io_error(&e));
                 return Err(AiError::Interrupted);
@@ -385,6 +506,49 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let r = read_stream(OK.as_bytes(), &cancel, &mut |_| {});
         assert_eq!(r, Err(AiError::Cancelled));
+    }
+
+    /// « Arrêter » rend la main sans attendre le serveur, qui ne répond plus.
+    #[test]
+    fn cancel_does_not_wait_for_a_silent_server() {
+        struct Silent;
+        impl Read for Silent {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(0)
+            }
+        }
+        let rx = in_background(|tx| {
+            let start = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n";
+            let _ = tx.send(Piece::Data(start.as_bytes().to_vec()));
+            pump(Silent, &tx);
+        });
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            stop.store(true, Ordering::Relaxed);
+        });
+        let begin = std::time::Instant::now();
+        let reader = io::BufReader::new(ChannelReader::new(rx, &cancel));
+        let r = read_stream(reader, &cancel, &mut |_| {});
+        assert_eq!(r, Err(AiError::Cancelled));
+        assert!(
+            begin.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            begin.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_full_stream_reads_through_the_channel() {
+        let rx = in_background(|tx| pump(OK.as_bytes(), &tx));
+        let cancel = AtomicBool::new(false);
+        let mut text = String::new();
+        let reader = io::BufReader::new(ChannelReader::new(rx, &cancel));
+        let r = read_stream(reader, &cancel, &mut |t| text.push_str(t));
+        assert_eq!(r, Ok(StopReason::EndTurn));
+        assert!(text.starts_with("Bonjour"));
     }
 
     #[test]
