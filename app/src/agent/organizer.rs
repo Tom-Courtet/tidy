@@ -55,19 +55,105 @@ fn desktop_running() -> bool {
         .is_some_and(|s| s.lock().is_ok_and(|s| s.desktop_running))
 }
 
+/// Délai de secours : un bureau lancé depuis plus longtemps sans avoir signalé
+/// `DesktopReady` (bureau masqué au démarrage, fenêtre jamais posée) est abonné depuis
+/// longtemps ; les commandes en attente lui sont alors relayées.
+pub const READY_FALLBACK: Duration = Duration::from_secs(20);
+
 /// Relaie une commande au processus du bureau, ou l'applique au fichier s'il ne tourne
-/// pas.
-pub fn route(
+/// pas. Pendant le démarrage du bureau (lancé, pas encore abonné), la commande attend
+/// dans l'état partagé : elle sera relayée à `DesktopReady` ([`desktop_ready`]), ou
+/// appliquée au fichier si le bureau meurt avant ([`desktop_stopped`]).
+pub fn route(store: &Store, bus: &EventBus, command: DesktopCommand) -> Response {
+    route_with(SHARED.get().map(|s| &**s), store, bus, command)
+}
+
+fn route_with(
+    shared: Option<&Mutex<Shared>>,
     store: &Store,
     bus: &EventBus,
-    desktop_running: bool,
     command: DesktopCommand,
 ) -> Response {
-    if desktop_running {
-        bus.publish(Event::Desktop { command });
-        return Response::Ok;
+    if let Some(shared) = shared {
+        let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+        if s.desktop_running {
+            // Sous le verrou : l'ordre est gardé avec le vidage de la file.
+            if s.desktop_ready {
+                bus.publish(Event::Desktop { command });
+            } else {
+                log::debug!("commande du bureau en attente (bureau en démarrage)");
+                s.pending.push(command);
+            }
+            return Response::Ok;
+        }
     }
     let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
+    apply_to_file(store, bus, command)
+}
+
+/// Le bureau est abonné (`Request::DesktopReady`) : les commandes en attente lui sont
+/// relayées, dans l'ordre.
+pub fn desktop_ready(bus: &EventBus, shared: &Mutex<Shared>) {
+    let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+    if !s.desktop_running {
+        return;
+    }
+    s.desktop_ready = true;
+    flush(bus, &mut s);
+}
+
+/// Secours : bureau lancé depuis plus de [`READY_FALLBACK`] sans `DesktopReady`.
+pub fn flush_late(bus: &EventBus, shared: &Mutex<Shared>) {
+    let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+    let late = s.started_at.is_some_and(|t| t.elapsed() >= READY_FALLBACK);
+    if s.desktop_running && !s.desktop_ready && late && !s.pending.is_empty() {
+        log::warn!("bureau sans « prêt » depuis {READY_FALLBACK:?} : commandes relayées");
+        flush(bus, &mut s);
+    }
+}
+
+fn flush(bus: &EventBus, s: &mut Shared) {
+    for command in s.pending.drain(..) {
+        bus.publish(Event::Desktop { command });
+    }
+}
+
+/// Le bureau vient d'être lancé : les commandes attendront son `DesktopReady`.
+pub fn desktop_started(shared: &Mutex<Shared>) {
+    let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+    s.desktop_running = true;
+    s.desktop_ready = false;
+    s.started_at = Some(std::time::Instant::now());
+}
+
+/// Le bureau s'est arrêté (ou a été arrêté) : les commandes qu'il n'a pas reçues sont
+/// appliquées au fichier, dans l'ordre, avant toute nouvelle commande.
+pub fn desktop_stopped(store: &Store, bus: &EventBus, shared: &Mutex<Shared>) {
+    // [`WRITING`] d'abord : une commande arrivée entre-temps (bureau désormais arrêté)
+    // attend que la file soit appliquée.
+    let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
+    let pending = {
+        let mut s = shared.lock().unwrap_or_else(|p| p.into_inner());
+        s.desktop_running = false;
+        s.desktop_ready = false;
+        s.started_at = None;
+        std::mem::take(&mut s.pending)
+    };
+    if !pending.is_empty() {
+        log::info!(
+            "bureau arrêté avant d'être prêt : {} commande(s) appliquée(s) au fichier",
+            pending.len()
+        );
+    }
+    for command in pending {
+        if let Response::Error { message } = apply_to_file(store, bus, command) {
+            log::error!("commande du bureau perdue : {message}");
+        }
+    }
+}
+
+/// Applique une commande à `desktop.json` (bureau arrêté). L'appelant tient [`WRITING`].
+fn apply_to_file(store: &Store, bus: &EventBus, command: DesktopCommand) -> Response {
     // Un fichier qu'on n'a pas pu lire n'est jamais réécrit (il serait remplacé par un
     // bureau vide).
     let mut state: DesktopState = match store.load_checked() {
@@ -218,7 +304,7 @@ pub(super) fn send(
     }
     let running = desktop_running();
     for command in commands {
-        if let Response::Error { message } = route(store, bus, running, command) {
+        if let Response::Error { message } = route(store, bus, command) {
             return Err(message);
         }
     }
@@ -236,6 +322,16 @@ fn sync_icons(store: &Store, desktop_running: bool) {
     let store = store.clone();
     std::thread::spawn(move || {
         if desktop_running {
+            // Commandes en attente du démarrage du bureau : attendre qu'il les reçoive.
+            let deadline = std::time::Instant::now() + READY_FALLBACK;
+            while std::time::Instant::now() < deadline
+                && SHARED.get().is_some_and(|s| {
+                    s.lock()
+                        .is_ok_and(|s| s.desktop_running && !s.pending.is_empty())
+                })
+            {
+                std::thread::sleep(Duration::from_millis(200));
+            }
             std::thread::sleep(DESKTOP_SAVE_DELAY);
         }
         crate::icons::log_report(crate::icons::sync(&store, &[]), true);
@@ -252,6 +348,75 @@ mod tests {
     use super::*;
     use tidy_core::DeskBox;
     use tidy_core::model::ItemRef;
+
+    fn unassigned(names: &[&str]) -> DesktopCommand {
+        DesktopCommand::SetUnassigned {
+            items: names.iter().map(|n| ItemRef((*n).into())).collect(),
+        }
+    }
+
+    fn published(events: &std::sync::mpsc::Receiver<Event>) -> Vec<DesktopCommand> {
+        events
+            .try_iter()
+            .filter_map(|e| match e {
+                Event::Desktop { command } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Bureau lancé mais pas encore abonné : les commandes attendent, puis partent dans
+    /// l'ordre à `DesktopReady`.
+    #[test]
+    fn commands_wait_for_desktop_ready() {
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let bus = EventBus::default();
+        let events = bus.subscribe();
+        let shared = Mutex::new(Shared::default());
+        desktop_started(&shared);
+
+        for name in ["a", "b"] {
+            let r = route_with(Some(&shared), &store, &bus, unassigned(&[name]));
+            assert_eq!(r, Response::Ok);
+        }
+        assert!(
+            published(&events).is_empty(),
+            "rien ne part avant le « prêt »"
+        );
+        assert_eq!(shared.lock().unwrap().pending.len(), 2);
+        flush_late(&bus, &shared);
+        assert!(published(&events).is_empty(), "pas encore en retard");
+
+        desktop_ready(&bus, &shared);
+        assert_eq!(published(&events), [unassigned(&["a"]), unassigned(&["b"])]);
+        route_with(Some(&shared), &store, &bus, unassigned(&["c"]));
+        assert_eq!(published(&events), [unassigned(&["c"])]);
+        assert!(!data.path().join("desktop.json").exists());
+    }
+
+    /// Bureau mort avant d'être prêt : les commandes en attente vont au fichier.
+    #[test]
+    fn pending_commands_go_to_the_file_if_the_desktop_dies() {
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        store.save(&DesktopState::default()).unwrap();
+        let bus = EventBus::default();
+        let events = bus.subscribe();
+        let shared = Mutex::new(Shared::default());
+        desktop_started(&shared);
+        route_with(Some(&shared), &store, &bus, unassigned(&["a"]));
+        route_with(Some(&shared), &store, &bus, unassigned(&["a", "b"]));
+
+        desktop_stopped(&store, &bus, &shared);
+        assert!(published(&events).is_empty());
+        let state: DesktopState = store.load();
+        assert_eq!(state.unassigned, [ItemRef("a".into()), ItemRef("b".into())]);
+        assert!(shared.lock().unwrap().pending.is_empty());
+        // Bureau arrêté : directement au fichier.
+        route_with(Some(&shared), &store, &bus, unassigned(&[]));
+        assert!(store.load::<DesktopState>().unassigned.is_empty());
+    }
 
     /// Essai complet sur un faux bureau et des données jetables (bureau arrêté :
     /// l'agent écrit lui-même `desktop.json`).

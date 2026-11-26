@@ -76,7 +76,7 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
     let bus = EventBus::default();
     let shared = Arc::new(Mutex::new(Shared::default()));
     let desktop_hidden = Arc::new(Mutex::new(false));
-    let supervisor = Supervisor::spawn(store.clone(), Arc::clone(&shared))?;
+    let supervisor = Supervisor::spawn(store.clone(), bus.clone(), Arc::clone(&shared))?;
     supervisor.send(Command::Apply(settings.effective_desktop_mode()));
     organizer::start(store.clone(), bus.clone(), Arc::clone(&shared));
     {
@@ -117,14 +117,14 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     bus.publish(Event::CreateBox { at: None });
                     Ok(Response::Ok)
                 }
-                Request::Desktop { command } => {
-                    let running = shared.lock().is_ok_and(|s| s.desktop_running);
-                    Ok(organizer::route(&store, &bus, running, command))
-                }
+                Request::Desktop { command } => Ok(organizer::route(&store, &bus, command)),
                 Request::ApplyRules { all } => Ok(organizer::apply_rules(&store, &bus, all)),
                 Request::UndoOrganize => Ok(organizer::undo(&store, &bus)),
                 Request::RestoreFinder => send(UserEvent::RestoreFinder),
                 Request::DesktopReady => {
+                    // Commandes reçues pendant le démarrage du bureau : relayées
+                    // maintenant qu'il est abonné.
+                    organizer::desktop_ready(&bus, &shared);
                     supervisor.send(Command::DesktopReady);
                     Ok(Response::Ok)
                 }

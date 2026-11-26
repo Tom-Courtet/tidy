@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use tidy_core::Store;
+use tidy_core::events::EventBus;
 use tidy_core::settings::DesktopMode;
 use tidy_platform::finder::{self, SystemFinder};
 
@@ -43,7 +44,16 @@ pub enum Command {
 /// État partagé avec le reste de l'agent.
 #[derive(Debug, Default)]
 pub struct Shared {
+    /// Processus du bureau lancé (il n'est peut-être pas encore abonné).
     pub desktop_running: bool,
+    /// Le bureau a signalé `Request::DesktopReady` : il est abonné et applique les
+    /// `Event::Desktop`. Avant, les commandes attendent dans [`Shared::pending`].
+    pub desktop_ready: bool,
+    /// Commandes reçues pendant le démarrage du bureau, dans l'ordre (voir
+    /// [`super::organizer::route`]).
+    pub pending: Vec<tidy_core::DesktopCommand>,
+    /// Lancement du bureau, pour le délai de secours de [`super::organizer::flush_late`].
+    pub started_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -52,11 +62,11 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn spawn(store: Store, shared: Arc<Mutex<Shared>>) -> Result<Self> {
+    pub fn spawn(store: Store, bus: EventBus, shared: Arc<Mutex<Shared>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         thread::Builder::new()
             .name("tidy-supervisor".into())
-            .spawn(move || Worker::new(store, shared).run(rx))
+            .spawn(move || Worker::new(store, bus, shared).run(rx))
             .context("fil de surveillance du bureau")?;
         Ok(Self { tx })
     }
@@ -77,6 +87,7 @@ impl Supervisor {
 
 struct Worker {
     store: Store,
+    bus: EventBus,
     shared: Arc<Mutex<Shared>>,
     mode: DesktopMode,
     child: Option<Child>,
@@ -86,9 +97,10 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(store: Store, shared: Arc<Mutex<Shared>>) -> Self {
+    fn new(store: Store, bus: EventBus, shared: Arc<Mutex<Shared>>) -> Self {
         Self {
             store,
+            bus,
             shared,
             mode: DesktopMode::Off,
             child: None,
@@ -118,7 +130,10 @@ impl Worker {
                     let _ = ack.send(());
                     return;
                 }
-                Err(RecvTimeoutError::Timeout) => self.check_child(),
+                Err(RecvTimeoutError::Timeout) => {
+                    self.check_child();
+                    super::organizer::flush_late(&self.bus, &self.shared);
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     self.stop_child();
                     self.restore_finder();
@@ -256,9 +271,13 @@ impl Worker {
         }
     }
 
+    /// Note le lancement ou l'arrêt du bureau. À l'arrêt, les commandes qu'il n'a pas
+    /// reçues (démarrage pas fini) sont appliquées au fichier.
     fn set_running(&self, running: bool) {
-        if let Ok(mut shared) = self.shared.lock() {
-            shared.desktop_running = running;
+        if running {
+            super::organizer::desktop_started(&self.shared);
+        } else {
+            super::organizer::desktop_stopped(&self.store, &self.bus, &self.shared);
         }
     }
 }
