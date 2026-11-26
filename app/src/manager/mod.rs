@@ -13,6 +13,7 @@
 
 mod appearance;
 mod boxes;
+mod finish;
 mod layouts;
 mod onboarding;
 mod organization;
@@ -178,6 +179,8 @@ pub enum Confirm {
     ApplyToAll,
     /// Annuler le rangement automatique.
     UndoOrganize,
+    /// Désinstaller Tidy (lot K ; les données restent).
+    Uninstall,
 }
 
 /// État de saisie des pages (textes en cours, sections ouvertes).

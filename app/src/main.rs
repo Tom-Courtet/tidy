@@ -11,11 +11,13 @@
 //! - `--manager` : la fenêtre principale (réglages), à la demande ;
 //! - `--create-box` : crée une boîte sous la souris (menu contextuel du bureau) ;
 //! - `--restore-desktop` (ou `--restore-finder`) : rend les icônes du bureau ;
+//! - `--install` : installe Tidy pour cet utilisateur (Windows) ;
 //! - `--uninstall` : retire tout ce que Tidy a posé hors de son dossier de données.
 
 mod agent;
 mod desktop;
 mod icons;
+mod install;
 mod ipc;
 mod lang;
 mod logging;
@@ -45,7 +47,11 @@ Usage :
   tidy --restore-desktop  rend les icônes du bureau si Tidy les a masquées
   tidy --desktop-icons    liste les icônes du bureau et leur position (Windows)
   tidy --hide-icon <nom>  essai : masque l'icône d'un élément du bureau (Windows)
-  tidy --uninstall        retire Tidy du système (menu du bureau, démarrage, icônes)
+  tidy --install [--force]
+                          installe Tidy dans %LOCALAPPDATA%\\Programs\\Tidy (Windows),
+                          ou le met à jour ; --force : même sur une version plus récente
+  tidy --uninstall        retire Tidy du système (processus, icônes, fond d'écran,
+                          registre, menu Démarrer) ; les données restent
   tidy --quit             arrête l'agent
   tidy --version
 
@@ -66,6 +72,7 @@ enum Role {
     UndoOrganize,
     ListIcons,
     HideIcon,
+    Install,
     Uninstall,
     Quit,
     Version,
@@ -88,6 +95,7 @@ fn parse_role(arg: Option<&str>) -> Option<Role> {
         Some("--undo-organize") => Role::UndoOrganize,
         Some("--desktop-icons") => Role::ListIcons,
         Some("--hide-icon") => Role::HideIcon,
+        Some("--install") => Role::Install,
         Some("--uninstall") => Role::Uninstall,
         Some("--quit") => Role::Quit,
         Some("--version" | "-V") => Role::Version,
@@ -109,7 +117,18 @@ fn main() -> Result<()> {
             if ipc::request(&store, &Request::Ping).is_ok() {
                 // Relancé (Finder, Launchpad) alors qu'il tourne : on montre la fenêtre
                 // principale, sauf au démarrage de session.
-                if !background {
+                // Windows : un exécutable téléchargé, alors qu'une copie installée
+                // tourne, ouvre sa propre fenêtre sur les Options, où la mise à jour
+                // est proposée.
+                let offer = install::current_situation().is_some_and(|(_, s)| {
+                    matches!(
+                        s,
+                        install::Situation::Older { .. } | install::Situation::Same { .. }
+                    )
+                });
+                if offer && !background {
+                    install::spawn_self(&["--manager", "options"])?;
+                } else if !background {
                     let _ = ipc::request(&store, &Request::OpenManager { page: None });
                 }
                 println!("Tidy tourne déjà (icône dans la barre des menus).");
@@ -206,30 +225,36 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Role::Install => {
+            lang::apply(store.load::<tidy_core::Settings>().language);
+            let force = std::env::args().nth(2).as_deref() == Some("--force");
+            let title = tidy_ui::t!("finish.install_title");
+            match install::install(&store, force) {
+                Ok(dir) => {
+                    let text = tidy_ui::t!("finish.installed", path = dir.display());
+                    println!("{text}");
+                    tidy_platform::install::message_box(title, &text, false);
+                    Ok(())
+                }
+                Err(e) => {
+                    let text = format!("{}\n\n{e:#}", tidy_ui::t!("finish.install_failed"));
+                    log::error!("installation : {e:#}");
+                    eprintln!("{text}");
+                    tidy_platform::install::message_box(title, &text, true);
+                    std::process::exit(1);
+                }
+            }
+        }
         Role::Uninstall => {
-            // Tout ce que Tidy a posé hors de son dossier de données.
-            let _ = ipc::request(&store, &Request::Quit);
-            let platform = tidy_platform::current();
-            if let Err(e) = platform.set_desktop_menu(None) {
-                eprintln!("menu du bureau : {e:#}");
-            }
-            if let Err(e) = platform.set_login_item(false) {
-                eprintln!("ouverture de session : {e:#}");
-            }
-            if platform.desktop_icons_hidden() {
-                let _ = platform.set_desktop_icons_hidden(false);
-            }
-            icons::restore_all(&store);
-            let marker = store.finder_marker_path();
-            let _ =
-                tidy_platform::finder::restore_icons(&tidy_platform::finder::SystemFinder, &marker);
-            // Fond d'écran d'origine (lot J).
-            if let Err(e) = agent::wallpaper::restore_original(&store) {
-                eprintln!("fond d'écran d'origine : {e:#}");
-            }
-            println!(
-                "Tidy est retiré du système. Tes réglages restent dans {} (à supprimer à la main si tu veux).",
-                store.root().display()
+            lang::apply(store.load::<tidy_core::Settings>().language);
+            let report = install::uninstall(&store);
+            let text = report.text(store.root());
+            log::info!("désinstallation : {text}");
+            println!("{text}");
+            tidy_platform::install::message_box(
+                tidy_ui::t!("finish.uninstall_title"),
+                &text,
+                !report.warnings.is_empty(),
             );
             Ok(())
         }
@@ -293,6 +318,8 @@ mod tests {
             parse_role(Some("--restore-finder")),
             Some(Role::RestoreFinder)
         );
+        assert_eq!(parse_role(Some("--install")), Some(Role::Install));
+        assert_eq!(parse_role(Some("--uninstall")), Some(Role::Uninstall));
         assert_eq!(parse_role(Some("--nimporte")), None);
     }
 }

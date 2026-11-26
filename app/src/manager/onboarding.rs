@@ -1,7 +1,9 @@
 //! Assistant de premier lancement, en trois étapes :
 //! 1. « Démarrage rapide » (Tidy range le bureau tout de suite) ou « Personnaliser »
 //!    (aucun rangement) ;
-//! 2. langue et lancement à l'ouverture de session ;
+//! 2. langue et lancement à l'ouverture de session ; sous Windows, installation si
+//!    l'exécutable ne tourne pas depuis son dossier d'installation ; sous macOS,
+//!    autorisations demandées (lot K) ;
 //! 3. récapitulatif, puis `onboarding_done = true`.
 //!
 //! Le démarrage rapide demande `ApplyRules { all: true }` à l'agent, qui crée les
@@ -151,6 +153,11 @@ fn preferences(m: &mut Manager, ui: &mut egui::Ui) {
         widgets::row_separator(ui);
         pages::launch_at_login_row(m, ui);
     });
+    ui.add_space(12.0);
+    // Lot K : installation (Windows, exécutable lancé depuis Téléchargements…) et
+    // autorisations demandées par macOS.
+    super::finish::install_offer(m, ui);
+    super::finish::permissions(m, ui);
 }
 
 fn summary(ui: &mut egui::Ui, wizard: &Wizard) {

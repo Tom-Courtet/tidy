@@ -235,7 +235,15 @@ impl App {
     fn install_desktop_menu(&self) {
         let label =
             (self.settings.desktop_mode != DesktopMode::Off).then(|| t!("desktop.menu_create_box"));
-        if let Err(e) = tidy_platform::current().set_desktop_menu(label) {
+        // Vers la copie installée si elle existe (lot K), même si cet agent a été lancé
+        // depuis un exécutable téléchargé.
+        let result = match (label, crate::install::Layout::from_env()) {
+            (Some(label), Some(layout)) if layout.exe.is_file() => {
+                tidy_platform::install::set_desktop_menu_for(&layout.exe, label)
+            }
+            (label, _) => tidy_platform::current().set_desktop_menu(label),
+        };
+        if let Err(e) = result {
             log::warn!("menu du bureau : {e:#}");
         }
     }
@@ -258,6 +266,8 @@ impl App {
             boxes_enabled: self.settings.desktop_mode != DesktopMode::Off,
             desktop_hidden: self.desktop_hidden.lock().is_ok_and(|h| *h),
             layouts: layouts::names(&self.store),
+            wallpaper_playlist: self.settings.wallpaper.enabled
+                && self.settings.wallpaper.uses_playlist(),
         };
         if let Some(tray) = &mut self.tray {
             tray.show(view);
@@ -299,10 +309,19 @@ impl App {
             self.supervisor
                 .send(Command::Apply(self.settings.effective_desktop_mode()));
         }
-        if old.launch_at_login != self.settings.launch_at_login
-            && let Err(e) = tidy_platform::current().set_login_item(self.settings.launch_at_login)
-        {
-            log::warn!("ouverture de session : {e:#}");
+        if old.launch_at_login != self.settings.launch_at_login {
+            // Windows : vers la copie installée si elle existe (lot K).
+            let result = match crate::install::Layout::from_env() {
+                Some(layout) if self.settings.launch_at_login && layout.exe.is_file() => {
+                    tidy_platform::install::set_login_for(&layout.exe)
+                }
+                _ => tidy_platform::current()
+                    .set_login_item(self.settings.launch_at_login)
+                    .map(|_| ()),
+            };
+            if let Err(e) = result {
+                log::warn!("ouverture de session : {e:#}");
+            }
         }
         self.bus.publish(Event::SettingsChanged);
         if old.language != self.settings.language || old.desktop_mode != self.settings.desktop_mode
@@ -427,6 +446,20 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Menu(MenuChoice::OpenLayouts) => {
                 self.open_manager(Some(layouts::MODULE.into()))
             }
+            UserEvent::Menu(MenuChoice::Search) => search::open(&self.bus, None),
+            UserEvent::Menu(MenuChoice::OpenWidgets) => self.open_manager(Some("widgets".into())),
+            UserEvent::Menu(MenuChoice::OpenWallpapers) => {
+                self.open_manager(Some("wallpapers".into()))
+            }
+            UserEvent::Menu(MenuChoice::NextWallpaper) => {
+                let _ = wallpaper::handle("next");
+            }
+            // Le bureau tient la boîte privée : la demande lui est relayée.
+            UserEvent::Menu(MenuChoice::LockVault) => self.bus.publish(Event::Module {
+                module: "vault".into(),
+                action: "lock".into(),
+                data: serde_json::Value::Null,
+            }),
             UserEvent::LayoutsChanged => {
                 self.register_hotkeys();
                 self.refresh_tray();

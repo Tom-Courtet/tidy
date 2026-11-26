@@ -75,6 +75,8 @@ fn home(m: &mut Manager, ui: &mut egui::Ui) {
     ui.add_space(4.0);
     widgets::hint(ui, t!("home.intro"));
     ui.add_space(18.0);
+    // Windows : exécutable lancé hors de son dossier d'installation (lot K).
+    super::finish::install_offer(m, ui);
     widgets::card(ui, |ui| {
         ui.label(t!(
             "home.desktop_mode",
@@ -235,6 +237,15 @@ fn options(m: &mut Manager, ui: &mut egui::Ui) {
             m.onboarding = Some(super::onboarding::Wizard::default());
         }
     });
+    ui.add_space(12.0);
+
+    // Lot K : réglages restants, installation, autorisations, à propos.
+    super::finish::box_layout(m, ui);
+    ui.add_space(12.0);
+    super::finish::installation(m, ui);
+    ui.add_space(12.0);
+    super::finish::permissions(m, ui);
+    super::finish::about(m, ui);
 }
 
 fn diagnostic(m: &mut Manager, ui: &mut egui::Ui) {
@@ -374,6 +385,14 @@ pub fn confirmation(m: &mut Manager, ctx: &egui::Context) {
             t!("organization_page.undo"),
             false,
         ),
+        Confirm::Uninstall => widgets::confirm(
+            ctx,
+            "désinstaller",
+            t!("finish.uninstall_confirm_title"),
+            t!("finish.uninstall_confirm_body"),
+            t!("finish.uninstall_button"),
+            true,
+        ),
     };
     let Some(yes) = answer else {
         return;
@@ -399,5 +418,6 @@ pub fn confirmation(m: &mut Manager, ctx: &egui::Context) {
                 m.show_notice(t!("organization_page.undone"));
             }
         }
+        Confirm::Uninstall => super::finish::start_uninstall(m),
     }
 }

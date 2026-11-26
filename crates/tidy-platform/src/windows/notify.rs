@@ -14,7 +14,7 @@ use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 use windows::core::HSTRING;
 
 /// Identifiant de Tidy pour ses notifications.
-const AUMID: &str = "Tidy.Desktop";
+pub(super) const AUMID: &str = "Tidy.Desktop";
 /// Identifiant de PowerShell (repli).
 const POWERSHELL_AUMID: &str =
     r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe";
