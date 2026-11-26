@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use tidy_core::category::Category;
 use tidy_core::geometry::Rect;
 use tidy_core::model::{BoxId, SortKey, ViewMode};
 
@@ -162,4 +163,36 @@ pub enum Action {
     // --- Bandeau des non affectées ---
     ApplyRules,
     DismissUnassigned,
+
+    // --- Lot M : ce qui manquait aux boîtes par rapport à l'original ---
+    /// Recherche dans la barre de titre (affichée ou non).
+    ToggleSearchInTitle {
+        b: BoxId,
+    },
+    /// Geler la boîte : ni déplacement ni redimensionnement.
+    ToggleFreeze {
+        b: BoxId,
+    },
+    ToggleExcludeQuickHide {
+        b: BoxId,
+    },
+    ToggleExcludeQuickAccess {
+        b: BoxId,
+    },
+    /// Vider le cache d'icônes de la boîte et relire son dossier.
+    RefreshIcons {
+        b: BoxId,
+    },
+    /// « Ranger ici » : cocher ou décocher la boîte comme cible d'une catégorie
+    /// (`None` : le fourre-tout).
+    ToggleRuleTarget {
+        b: BoxId,
+        category: Option<Category>,
+    },
+    /// Fenêtre principale, page Rangement.
+    OpenRules,
+    /// Fenêtre principale, page Boîtes, cette boîte dépliée.
+    BoxSettings {
+        b: BoxId,
+    },
 }

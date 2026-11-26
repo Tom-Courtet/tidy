@@ -70,6 +70,8 @@ impl Page {
         Some(match arg {
             "home" => Page::Home,
             "boxes" => Page::Boxes,
+            // « boxes:<id> » : la page Boîtes, cette boîte dépliée (menu ☰ > Réglages…).
+            a if boxes::box_from_arg(a).is_some() => Page::Boxes,
             "organization" => Page::Organization,
             "quick-actions" | "quick_actions" => Page::QuickActions,
             "layouts" => Page::Layouts,
@@ -221,6 +223,11 @@ const NOTICE_FOR: Duration = Duration::from_secs(4);
 impl Manager {
     fn new(store: Store, settings: Settings, events: Receiver<Event>, page: Option<Page>) -> Self {
         let desktop = store.load();
+        // `--manager boxes:<id>` : boîte à déplier.
+        let open_box = std::env::args()
+            .nth(2)
+            .as_deref()
+            .and_then(boxes::box_from_arg);
         // Une page demandée explicitement (`--manager boxes`) passe avant l'assistant.
         let onboarding = match page {
             Some(Page::Onboarding) => true,
@@ -243,7 +250,10 @@ impl Manager {
             error: None,
             notice: None,
             confirm: None,
-            drafts: Drafts::default(),
+            drafts: Drafts {
+                open_box,
+                ..Drafts::default()
+            },
             onboarding,
             dirty_boxes: BTreeSet::new(),
             settings_dirty: false,
@@ -364,6 +374,9 @@ impl Manager {
                 Event::FocusManager { page } => {
                     if let Some(page) = page.as_deref().and_then(Page::from_arg) {
                         self.page = page;
+                    }
+                    if let Some(id) = page.as_deref().and_then(boxes::box_from_arg) {
+                        self.drafts.open_box = Some(id);
                     }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);

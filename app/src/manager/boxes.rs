@@ -25,6 +25,13 @@ pub fn display_name(name: &str) -> String {
     }
 }
 
+/// Boîte désignée par l'argument de page `boxes:<id>` (menu ☰ > Réglages… d'une
+/// boîte), s'il est de cette forme.
+pub fn box_from_arg(arg: &str) -> Option<BoxId> {
+    let id = arg.strip_prefix("boxes:")?;
+    serde_json::from_value(serde_json::Value::String(id.to_owned())).ok()
+}
+
 /// `path` est-il le dossier du bureau ou un dossier qu'il contient ? Un portail ne peut
 /// pas montrer le bureau lui-même.
 pub fn is_desktop_itself(path: &Path, desktop: &Path) -> bool {
@@ -330,6 +337,23 @@ fn details(m: &mut Manager, ui: &mut egui::Ui, b: &DeskBox) {
         |ui| widgets::toggle(ui, &mut edited.exclude_from_quick_access),
     );
     widgets::row_separator(ui);
+    // Lot M : recherche dans le titre, gel.
+    widgets::setting_row(
+        ui,
+        icons::SEARCH,
+        t!("box_extra.view_search"),
+        Some(t!("box_extra.search_page_hint")),
+        |ui| widgets::toggle(ui, &mut edited.search_in_title),
+    );
+    widgets::row_separator(ui);
+    widgets::setting_row(
+        ui,
+        icons::LOCK,
+        t!("box_extra.menu_freeze"),
+        Some(t!("box_extra.frozen_tooltip")),
+        |ui| widgets::toggle(ui, &mut edited.frozen),
+    );
+    widgets::row_separator(ui);
 
     if edited != *b {
         // Le nom suit sa propre saisie (peut-être validée dans cette même image).
@@ -345,6 +369,18 @@ fn details(m: &mut Manager, ui: &mut egui::Ui, b: &DeskBox) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_of_one_box() {
+        let b = BoxId::new();
+        assert_eq!(box_from_arg(&format!("boxes:{}", b.0)), Some(b));
+        assert_eq!(box_from_arg("boxes"), None);
+        assert_eq!(box_from_arg("boxes:pas-un-identifiant"), None);
+        assert_eq!(
+            super::super::Page::from_arg(&format!("boxes:{}", b.0)),
+            Some(super::super::Page::Boxes)
+        );
+    }
 
     #[test]
     fn only_the_desktop_itself_cannot_be_a_portal() {

@@ -3,20 +3,22 @@
 //!
 //! La fenêtre a la taille de la boîte : la carte occupe toute la fenêtre. Le système
 //! déplace et redimensionne la fenêtre lui-même (`StartDrag`, `BeginResize`), ce qui
-//! reste fluide même quand l'interface ne se redessine pas.
+//! reste fluide même quand l'interface ne se redessine pas. Une boîte gelée
+//! (`DeskBox::frozen`) ne demande ni l'un ni l'autre.
 
 use std::time::{Duration, Instant};
 
 use egui::viewport::ResizeDirection;
 use egui::{
-    Align2, Color32, CornerRadius, CursorIcon, FontId, Key, Rect, Sense, Stroke, StrokeKind,
-    TextEdit, Ui, ViewportCommand, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, FontId, Key, Modifiers, Rect, Sense, Stroke,
+    StrokeKind, TextEdit, Ui, ViewportCommand, pos2, vec2,
 };
 use tidy_core::model::{Appearance, DeskBox, Rgba, TitleVisibility};
 use tidy_ui::{icons, t, theme, widgets};
 
 use super::action::Action;
 use super::items::{self, GridGeom, ItemDir, ItemsState, ItemsView, Section};
+use super::search::{self, SearchEdit};
 use super::textures::IconCache;
 
 /// Hauteur de la barre de titre.
@@ -29,6 +31,9 @@ const EDGE: f32 = 6.0;
 pub const MIN_SIZE: [f32; 2] = [160.0, 90.0];
 /// Durée d'un message dans une boîte.
 const NOTICE: Duration = Duration::from_secs(5);
+/// Fond « verre dépoli » actif : opacité du fond multipliée par ce facteur, pour
+/// laisser voir le flou du système.
+const GLASS_ALPHA: f32 = 0.45;
 
 /// Couleur d'apparence, opacité multipliée par `alpha`.
 pub fn color(c: Rgba, alpha: f32) -> Color32 {
@@ -50,6 +55,8 @@ pub struct BoxUi {
     pub renaming_title: Option<NameEdit>,
     pub renaming_tab: Option<(usize, NameEdit)>,
     notice: Option<(String, Instant)>,
+    /// Champ de recherche ouvert dans la barre de titre.
+    pub search: Option<SearchEdit>,
 }
 
 impl BoxUi {
@@ -58,11 +65,18 @@ impl BoxUi {
         self.notice = Some((text.into(), Instant::now()));
     }
 
-    /// Un nom est en cours d'édition (la boîte ne doit pas s'enrouler).
+    /// Un nom est en cours d'édition, ou une recherche ouverte (la boîte ne doit pas
+    /// s'enrouler).
     pub fn editing(&self) -> bool {
         self.renaming_title.is_some()
             || self.renaming_tab.is_some()
             || self.items.renaming.is_some()
+            || self.search.is_some()
+    }
+
+    /// Texte cherché (replié), si la recherche est ouverte et non vide.
+    pub fn search_query(&self) -> Option<String> {
+        self.search.as_ref().and_then(SearchEdit::query)
     }
 }
 
@@ -85,6 +99,8 @@ pub struct BoxView<'a> {
     /// Cible d'un glisser interne en cours.
     pub drop_target: bool,
     pub single_click: bool,
+    /// Fond « verre dépoli » du système actif derrière la fenêtre.
+    pub glass: bool,
 }
 
 /// Ce que la boîte rapporte en plus des actions.
@@ -172,6 +188,12 @@ pub fn draw(
         },
         0.18,
     );
+    // Verre : le fond est plus transparent pour laisser voir le flou.
+    let opacity = if v.glass {
+        opacity * GLASS_ALPHA
+    } else {
+        opacity
+    };
     let r = look.corner_radius.clamp(0.0, 40.0) as u8;
     let radius = CornerRadius::same(r);
     painter.rect_filled(rect, radius, color(look.background, opacity));
@@ -192,12 +214,25 @@ pub fn draw(
         );
     }
 
-    // Barre de titre.
+    // Recherche : fermée si l'option a été retirée, si la boîte est enroulée ou s'il
+    // n'y a pas de barre de titre pour l'afficher ; Ctrl+F (⌘F) l'ouvre.
     let title_h = title_height(look, v.rolled);
+    if !b.search_in_title || title_h == 0.0 || v.rolled {
+        st.search = None;
+    } else if st.renaming_title.is_none()
+        && ctx.input(|i| i.viewport().focused.unwrap_or(false))
+        && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::F))
+    {
+        st.search.get_or_insert_with(SearchEdit::new).focus = true;
+    }
+
+    // Barre de titre.
     let title_rect = Rect::from_min_size(rect.min, vec2(rect.width(), title_h));
     let show_title = match look.title_visibility {
         TitleVisibility::Always => true,
-        TitleVisibility::OnHover => result.hovered || v.rolled || st.renaming_title.is_some(),
+        TitleVisibility::OnHover => {
+            result.hovered || v.rolled || st.renaming_title.is_some() || st.search.is_some()
+        }
         TitleVisibility::Never => v.rolled,
     };
     if title_h > 0.0 {
@@ -237,11 +272,19 @@ pub fn draw(
     if background.secondary_clicked() {
         out.push(Action::BoxMenu { b: id });
     }
-    // Sans barre de titre : on déplace la boîte par son fond.
-    if background.drag_started() {
+    // Sans barre de titre : on déplace la boîte par son fond (pas si elle est gelée).
+    if background.drag_started() && !b.frozen {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
+    let query = st.search_query();
     let empty = v.sections.iter().all(|s| s.items.is_empty());
+    let no_match = !empty
+        && query.as_deref().is_some_and(|q| {
+            !v.sections
+                .iter()
+                .flat_map(|s| s.items.iter())
+                .any(|i| search::matches(&i.name, q))
+        });
     let mut hovered_item = None;
     if let Some(dir) = v.dir {
         let content = body.shrink2(vec2(6.0, 4.0));
@@ -256,6 +299,7 @@ pub fn draw(
             single_click: v.single_click,
             portal: v.portal.is_some(),
             free: items::free_grid(b),
+            filter: query.as_deref(),
         };
         let r = items::show(&mut child, &view, &mut st.items, icons, out);
         result.dragging = r.dragging;
@@ -270,8 +314,9 @@ pub fn draw(
             before.clone_from(&hovered_item);
         }
     }
-    if empty {
+    if empty || no_match {
         let hint = match &v.portal {
+            _ if no_match => t!("box_extra.search_none"),
             Some(p) if p.error => t!("box.portal_unreadable"),
             Some(_) => t!("box.portal_empty"),
             None => t!("box.empty"),
@@ -315,7 +360,7 @@ pub fn draw(
         }
     }
 
-    resize_edges(&ctx, rect, &result, v.rolled);
+    resize_edges(&ctx, rect, &result, v.rolled || b.frozen);
     result
 }
 
@@ -367,10 +412,11 @@ fn title_bar(
             );
         }
     }
-    if drag.drag_started() {
+    // Gelée : la barre ne déplace plus la boîte.
+    if drag.drag_started() && !b.frozen {
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
-    if drag.dragged() {
+    if drag.dragged() && !b.frozen {
         ctx.set_cursor_icon(CursorIcon::Grabbing);
     }
     if drag.double_clicked() {
@@ -409,9 +455,14 @@ fn title_bar(
         out.push(Action::BoxMenu { b: id });
     }
 
-    // Enrouler / dérouler (au survol, ou si enroulée).
-    let roll = Rect::from_center_size(bar.right_center() - vec2(18.0, 0.0), vec2(26.0, 24.0));
-    let mut name_right = bar.right() - 10.0;
+    // À droite : enrouler / dérouler (au survol, ou si enroulée), recherche, gel.
+    // L'emplacement du bouton d'enroulement est gardé dès qu'il y a autre chose à
+    // droite, pour que la loupe ne bouge pas au survol.
+    let slot =
+        |right: f32| Rect::from_center_size(pos2(right - 13.0, bar.center().y), vec2(26.0, 24.0));
+    let roll = slot(bar.right() - 5.0);
+    let searchable = b.search_in_title && !v.rolled;
+    let mut right = bar.right() - 5.0;
     if result.hovered || b.rolled_up {
         let rr = ui.interact(roll, ui.scope_id().with("enrouler"), Sense::click());
         if rr.hovered() {
@@ -435,15 +486,86 @@ fn title_bar(
         if rr.clicked() {
             out.push(Action::ToggleRoll { b: id });
         }
-        name_right = roll.left() - 4.0;
+        right = roll.left() - 2.0;
+    } else if searchable || b.frozen {
+        right = roll.left() - 2.0;
     }
+    if searchable {
+        let loupe = slot(right);
+        let lr = ui.interact(loupe, ui.scope_id().with("loupe"), Sense::click());
+        let active = st.search.is_some();
+        if lr.hovered() || active {
+            painter.rect_filled(
+                loupe,
+                CornerRadius::same(8),
+                theme::TEXT.gamma_multiply(if active { 0.14 } else { 0.1 }),
+            );
+        }
+        painter.text(
+            loupe.center(),
+            Align2::CENTER_CENTER,
+            icons::SEARCH,
+            FontId::proportional(theme::SIZE_M),
+            if lr.hovered() || active {
+                theme::ACCENT_2
+            } else {
+                theme::TEXT_DIM
+            },
+        );
+        if lr.clicked() {
+            if active {
+                st.search = None;
+            } else {
+                st.search = Some(SearchEdit::new());
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+        }
+        lr.on_hover_text(t!("box_extra.search_tooltip"));
+        right = loupe.left() - 2.0;
+    }
+    if b.frozen {
+        let lock = Rect::from_center_size(pos2(right - 9.0, bar.center().y), vec2(18.0, 24.0));
+        painter.text(
+            lock.center(),
+            Align2::CENTER_CENTER,
+            icons::LOCK,
+            FontId::proportional(theme::SIZE_S),
+            theme::TEXT_DIM,
+        );
+        ui.interact(lock, ui.scope_id().with("gel"), Sense::hover())
+            .on_hover_text(t!("box_extra.frozen_tooltip"));
+        right = lock.left() - 2.0;
+    }
+    let name_right = (right - 4.0).max(menu.right() + 40.0);
 
     // Nom, ou son édition.
     let name_rect = Rect::from_min_max(
         pos2(menu.right() + 6.0, bar.top() + 4.0),
         pos2(name_right, bar.bottom() - 4.0),
     );
-    if let Some(edit) = st.renaming_title.as_mut() {
+    if st.renaming_title.is_none()
+        && searchable
+        && let Some(edit) = st.search.as_mut()
+    {
+        let resp = ui.put(
+            name_rect,
+            TextEdit::singleline(&mut edit.text)
+                .font(FontId::proportional(theme::SIZE_S))
+                .hint_text(t!("box_extra.search_hint"))
+                .margin(vec2(6.0, 2.0)),
+        );
+        if edit.focus {
+            edit.focus = false;
+            resp.request_focus();
+        }
+        // Échap vide et ferme ; un champ vide qui perd le focus se ferme aussi.
+        if resp.lost_focus() {
+            let cancel = ui.input(|i| i.key_pressed(Key::Escape));
+            if cancel || edit.text.trim().is_empty() {
+                st.search = None;
+            }
+        }
+    } else if let Some(edit) = st.renaming_title.as_mut() {
         let resp = ui.put(
             name_rect,
             TextEdit::singleline(&mut edit.text)
@@ -749,6 +871,161 @@ fn resize_edges(ctx: &egui::Context, rect: Rect, result: &BoxOutput, rolled: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::{Event, PointerButton, Pos2, RawInput};
+
+    /// Commandes de fenêtre demandées par une boîte quand on appuie en `from` puis
+    /// qu'on glisse jusqu'à `to`.
+    fn commands_for_drag(frozen: bool, from: Pos2, to: Pos2) -> Vec<ViewportCommand> {
+        let ctx = egui::Context::default();
+        let mut b = DeskBox::new("A");
+        b.frozen = frozen;
+        let look = Appearance::default();
+        let view = BoxView {
+            b: &b,
+            look: &look,
+            sections: &[],
+            dir: None,
+            portal: None,
+            rolled: false,
+            drop_target: false,
+            single_click: false,
+            glass: false,
+        };
+        let mut st = BoxUi::default();
+        let mut icons = IconCache::new(ctx.clone());
+        let press = |pressed| Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let frames = [
+            vec![Event::PointerMoved(from)],
+            vec![press(true)],
+            vec![Event::PointerMoved(from.lerp(to, 0.5))],
+            vec![Event::PointerMoved(to)],
+            vec![Event::PointerMoved(to), press(false)],
+        ];
+        let mut commands = Vec::new();
+        for events in frames {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(300.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                let mut out = Vec::new();
+                draw(ui, &view, &mut st, &mut icons, &mut out);
+            });
+            for viewport in output.viewport_output.values() {
+                commands.extend(viewport.commands.iter().cloned());
+            }
+            output.drop_without_applying_deltas();
+        }
+        commands
+    }
+
+    /// Éléments sélectionnés par Ctrl+A (⌘A) dans une boîte qui affiche `names`, avec
+    /// `search` tapé dans la barre de titre.
+    fn select_all_with_search(view_mode: tidy_core::model::ViewMode, search: &str) -> Vec<String> {
+        use tidy_core::category::Category;
+        use tidy_core::rules::ItemInfo;
+        let ctx = egui::Context::default();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = ItemDir::plain(dir.path().to_path_buf());
+        let mut b = DeskBox::new("A");
+        b.search_in_title = true;
+        b.view = view_mode;
+        let names = ["Été 2026.jpg", "notes.txt", "ETE.pdf", "budget.xlsx"];
+        let info = |name: &str| ItemInfo {
+            name: name.into(),
+            is_dir: false,
+            category: Category::Other,
+            size: 0,
+            modified: None,
+            uti: None,
+        };
+        let sections = [Section {
+            group: None,
+            items: names.iter().map(|n| info(n)).collect(),
+        }];
+        let look = Appearance::default();
+        let view = BoxView {
+            b: &b,
+            look: &look,
+            sections: &sections,
+            dir: Some(&dir),
+            portal: None,
+            rolled: false,
+            drop_target: false,
+            single_click: false,
+            glass: false,
+        };
+        let mut st = BoxUi {
+            search: Some(SearchEdit {
+                text: search.into(),
+                focus: false,
+            }),
+            ..Default::default()
+        };
+        let mut icons = IconCache::new(ctx.clone());
+        let mut input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+            events: vec![Event::Key {
+                key: Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            }],
+            ..Default::default()
+        };
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(true);
+        let output = ctx.run_ui(input, |ui| {
+            let mut out = Vec::new();
+            draw(ui, &view, &mut st, &mut icons, &mut out);
+        });
+        output.drop_without_applying_deltas();
+        st.items.selected.into_iter().collect()
+    }
+
+    #[test]
+    fn search_shows_only_matching_items() {
+        use tidy_core::model::ViewMode;
+        // Grille libre (ordre manuel), liste : seuls les éléments qui correspondent,
+        // sans tenir compte de la casse ni des accents, sont affichés et sélectionnés.
+        for mode in [ViewMode::Grid, ViewMode::List] {
+            assert_eq!(
+                select_all_with_search(mode, "ete"),
+                ["ETE.pdf", "Été 2026.jpg"],
+                "{mode:?}"
+            );
+            assert_eq!(select_all_with_search(mode, "  ").len(), 4, "{mode:?}");
+            assert!(select_all_with_search(mode, "zzz").is_empty(), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_frozen_box_neither_moves_nor_resizes() {
+        let title = (pos2(150.0, 16.0), pos2(220.0, 60.0));
+        let edge = (pos2(2.0, 100.0), pos2(-40.0, 100.0));
+        let moves = |c: &[ViewportCommand]| c.contains(&ViewportCommand::StartDrag);
+        let resizes = |c: &[ViewportCommand]| {
+            c.iter()
+                .any(|c| matches!(c, ViewportCommand::BeginResize(_)))
+        };
+        // Boîte ordinaire : la barre de titre déplace, le bord redimensionne.
+        assert!(moves(&commands_for_drag(false, title.0, title.1)));
+        assert!(resizes(&commands_for_drag(false, edge.0, edge.1)));
+        // Gelée : ni l'un ni l'autre.
+        assert!(!moves(&commands_for_drag(true, title.0, title.1)));
+        let at_edge = commands_for_drag(true, edge.0, edge.1);
+        assert!(!resizes(&at_edge) && !moves(&at_edge));
+    }
 
     #[test]
     fn edges_and_corners() {
