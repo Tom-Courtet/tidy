@@ -7,7 +7,11 @@
 //!   par `Event::Module { module: "wallpaper", action: "video_state" }` ;
 //! - **playlist** : l'agent tient le fond courant et l'intervalle ;
 //! - **pause intelligente** : l'état du système est relevé toutes les
-//!   [`TICK`] ; en pause, la vidéo s'arrête et la playlist n'avance plus ;
+//!   [`TICK`], seulement quand une vidéo ou une playlist est active ; en pause, la
+//!   vidéo s'arrête et la playlist n'avance plus ;
+//! - **sobriété** : fonds désactivés, le fil dort jusqu'au prochain message ; fonds
+//!   fixes seulement, il ne se réveille que toutes les [`SCREENS_EVERY`] (écrans
+//!   changés, image du jour) ;
 //! - **fond d'origine** : relevé avant le premier changement
 //!   (`wallpaper-original.json`), rendu quand les fonds de Tidy sont désactivés, sur
 //!   demande, ou à la désinstallation ([`restore_original`]). Tant que ce relevé n'est
@@ -38,7 +42,8 @@ use super::supervisor::ChildProcess;
 use crate::ipc::Response;
 use crate::wallpaper::{VideoScreen, VideoState};
 
-/// Fréquence des vérifications (pause, playlist, processus du lecteur).
+/// Fréquence des vérifications avec une vidéo ou une playlist (pause, playlist,
+/// processus du lecteur).
 const TICK: Duration = Duration::from_secs(2);
 /// Relecture des écrans.
 const SCREENS_EVERY: Duration = Duration::from_secs(10);
@@ -230,10 +235,32 @@ impl Controller {
         }
     }
 
+    /// Délai avant la prochaine vérification ; `None` : rien à surveiller, le fil
+    /// dort jusqu'au prochain message (réglages changés, demande de la page…).
+    fn next_tick(&self) -> Option<Duration> {
+        if !self.settings.enabled {
+            return None;
+        }
+        if self.animated() || self.original_missing || self.player.running() {
+            Some(TICK)
+        } else {
+            Some(SCREENS_EVERY)
+        }
+    }
+
+    /// Vidéo affichée ou playlist en cours : la pause intelligente compte.
+    fn animated(&self) -> bool {
+        !self.video.screens.is_empty() || self.settings.uses_playlist()
+    }
+
     fn run(mut self, rx: Receiver<Msg>) {
         self.apply();
         loop {
-            match rx.recv_timeout(TICK) {
+            let received = match self.next_tick() {
+                Some(tick) => rx.recv_timeout(tick),
+                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match received {
                 Ok(Msg::Reload) => {
                     if self.store.reload(&mut self.library) {
                         self.apply();
@@ -364,18 +391,23 @@ impl Controller {
             return;
         }
         let mut dirty = self.refresh_screens();
-        // Pause intelligente.
-        let activity = tidy_platform::current().system_activity();
-        let reason = pause::reason(
-            &self.settings.pause,
-            &Conditions {
-                fullscreen: activity.fullscreen,
-                on_battery: activity.on_battery,
-                battery_percent: activity.battery_percent,
-                locked: activity.locked,
-                desktop_hidden: self.desktop_hidden,
-            },
-        );
+        // Pause intelligente : l'état du système (fenêtres en plein écran, batterie)
+        // n'est relevé que s'il y a quelque chose à mettre en pause.
+        let reason = if self.animated() {
+            let activity = tidy_platform::current().system_activity();
+            pause::reason(
+                &self.settings.pause,
+                &Conditions {
+                    fullscreen: activity.fullscreen,
+                    on_battery: activity.on_battery,
+                    battery_percent: activity.battery_percent,
+                    locked: activity.locked,
+                    desktop_hidden: self.desktop_hidden,
+                },
+            )
+        } else {
+            None
+        };
         if reason != self.paused {
             log::info!(
                 "fonds d'écran : {}",

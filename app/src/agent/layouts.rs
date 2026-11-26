@@ -42,8 +42,8 @@ use crate::ipc::Response;
 /// Nom du module dans les messages.
 pub const MODULE: &str = "layouts";
 
-/// Fréquence de relevé de `desktop.json`.
-const POLL: Duration = Duration::from_secs(1);
+/// Fréquence de relevé de `desktop.json` (date de modification seulement).
+const POLL: Duration = Duration::from_secs(2);
 /// Calme attendu après un changement avant de prendre l'instantané.
 const QUIET: Duration = Duration::from_secs(3);
 /// Attente maximale (changements continus) avant de prendre l'instantané.

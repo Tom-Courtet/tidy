@@ -27,7 +27,7 @@ use tidy_platform::finder::{self, SystemFinder};
 const MAX_CRASHES: usize = 3;
 const CRASH_WINDOW: Duration = Duration::from_secs(60);
 /// Fréquence de vérification du processus.
-const POLL: Duration = Duration::from_millis(500);
+const POLL: Duration = Duration::from_secs(1);
 /// À l'arrêt de l'agent, délai laissé au bureau pour finir de lui-même (il reçoit
 /// `Event::Shutdown` et verrouille la boîte privée : rechiffrement des fichiers ouverts
 /// modifiés, effacement des copies en clair ; jusqu'à 10 s) avant d'être tué.

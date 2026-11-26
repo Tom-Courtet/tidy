@@ -258,9 +258,9 @@ impl ApplicationHandler<Msg> for App {
             }
             _ => {}
         }
-        // Sous Windows, le lecteur demande un coup d'œil régulier (fin de vidéo) ; sous
-        // macOS, AVFoundation boucle seul : on dort.
-        if cfg!(windows) {
+        // Sous Windows, le lecteur demande un coup d'œil régulier (fin de vidéo), mais
+        // pas en pause ; sous macOS, AVFoundation boucle seul : on dort.
+        if cfg!(windows) && !self.state.paused {
             event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
