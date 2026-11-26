@@ -6,13 +6,15 @@
 //! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
 //! - [`shell`] : icônes des fichiers, menu contextuel et glisser-déposer du Shell ;
 //! - [`watch`] : changements d'écrans ;
-//! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
+//! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
+//! - [`wallpaper`] : fonds d'écran (lot J).
 
 mod desktop;
 mod icons;
 mod registry;
 mod screens;
 mod shell;
+mod wallpaper;
 mod watch;
 mod window;
 
@@ -177,6 +179,41 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         registry::set_login(enabled)
+    }
+
+    // --- Lot J : fonds d'écran (`wallpaper.rs`). ---
+
+    fn wallpaper_snapshot(&self) -> Option<tidy_core::settings::wallpaper::OriginalWallpaper> {
+        wallpaper::snapshot()
+    }
+
+    fn set_wallpaper(
+        &self,
+        screen: Option<&tidy_core::screen::ScreenId>,
+        image: &Path,
+        fit: tidy_core::settings::wallpaper::Fit,
+        background: [u8; 3],
+    ) -> Result<()> {
+        wallpaper::set(screen, image, fit, background)
+    }
+
+    fn restore_wallpaper(
+        &self,
+        original: &tidy_core::settings::wallpaper::OriginalWallpaper,
+    ) -> Result<()> {
+        wallpaper::restore(original)
+    }
+
+    fn refresh_wallpaper(&self) {
+        wallpaper::refresh();
+    }
+
+    fn attach_wallpaper_window(&self, window: &dyn HasWindowHandle, frame: Rect) -> bool {
+        window::hwnd(window).is_some_and(|hwnd| wallpaper::attach(hwnd, frame))
+    }
+
+    fn system_activity(&self) -> crate::SystemActivity {
+        wallpaper::activity()
     }
 }
 
