@@ -105,10 +105,41 @@ pub fn note_path(data_dir: &Path, id: Uuid) -> PathBuf {
 
 /// Lit une note (`None` si elle n'existe pas ou est illisible).
 pub fn load(data_dir: &Path, id: Uuid) -> Option<Note> {
-    let bytes = std::fs::read(note_path(data_dir, id)).ok()?;
+    read_note(data_dir, id).ok().flatten()
+}
+
+/// Lit une note : `Ok(None)` si le fichier n'existe pas, `Err` s'il existe mais ne se
+/// lit pas (erreur d'accès, contenu abîmé ou d'une autre version).
+fn read_note(data_dir: &Path, id: Uuid) -> Result<Option<Note>, ()> {
+    let bytes = match std::fs::read(note_path(data_dir, id)) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            log::warn!("note {id} illisible : {e}");
+            return Err(());
+        }
+    };
     serde_json::from_slice(&bytes)
-        .inspect_err(|e| log::warn!("note {id} illisible : {e}"))
-        .ok()
+        .map(Some)
+        .map_err(|e| log::warn!("note {id} illisible : {e}"))
+}
+
+/// Met de côté le fichier illisible d'une note (`<id>.json.bad-<horodatage>`), pour
+/// qu'une note neuve ne l'écrase jamais. Rend `false` si le fichier est resté en place.
+fn set_aside(data_dir: &Path, id: Uuid) -> bool {
+    let path = note_path(data_dir, id);
+    let stamp = Timestamp::now().as_millisecond();
+    let bad = notes_dir(data_dir).join(format!("{id}.json.bad-{stamp}"));
+    match std::fs::rename(&path, &bad) {
+        Ok(()) => {
+            log::warn!("note {id} illisible, mise de côté : {}", bad.display());
+            true
+        }
+        Err(e) => {
+            log::error!("note {id} illisible et non mise de côté : {e}");
+            !path.exists()
+        }
+    }
 }
 
 /// Enregistre une note tout de suite (écriture atomique).
@@ -237,23 +268,45 @@ pub struct NoteWidget {
     s: NoteSettings,
     /// Note lue au premier affichage.
     note: Option<Note>,
+    /// Le fichier de la note existe mais n'a pu être ni lu ni mis de côté : rien n'est
+    /// écrit, pour ne jamais l'écraser.
+    read_only: bool,
 }
 
 impl NoteWidget {
     pub fn new(s: NoteSettings) -> Self {
-        Self { s, note: None }
+        Self {
+            s,
+            note: None,
+            read_only: false,
+        }
     }
 
-    /// Lit la note au premier affichage, ou la crée.
+    /// Lit la note au premier affichage, ou la crée. Un fichier illisible est mis de
+    /// côté avant d'écrire une note neuve, jamais écrasé.
     fn note(&mut self, data_dir: &Path) -> &mut Note {
         let id = self.s.note;
-        self.note.get_or_insert_with(|| {
-            load(data_dir, id).unwrap_or_else(|| {
-                let note = Note::new(id);
-                queue_write(data_dir, &note);
-                note
-            })
-        })
+        if self.note.is_none() {
+            let note = match read_note(data_dir, id) {
+                Ok(Some(note)) => note,
+                Ok(None) => {
+                    let note = Note::new(id);
+                    queue_write(data_dir, &note);
+                    note
+                }
+                Err(()) => {
+                    let note = Note::new(id);
+                    if set_aside(data_dir, id) {
+                        queue_write(data_dir, &note);
+                    } else {
+                        self.read_only = true;
+                    }
+                    note
+                }
+            };
+            self.note = Some(note);
+        }
+        self.note.get_or_insert_with(|| Note::new(id))
     }
 }
 
@@ -292,7 +345,9 @@ impl Widget for NoteWidget {
         if changed {
             note.updated = Timestamp::now();
             let note = note.clone();
-            queue_write(&data_dir, &note);
+            if !self.read_only {
+                queue_write(&data_dir, &note);
+            }
         }
     }
 
@@ -314,7 +369,9 @@ impl Widget for NoteWidget {
             note.color = i;
             note.updated = Timestamp::now();
             let note = note.clone();
-            queue_write(&data_dir, &note);
+            if !self.read_only {
+                queue_write(&data_dir, &note);
+            }
         }
         ui.add_space(8.0);
         widgets::hint(ui, t!("widgets.notes_file_hint"));
@@ -379,6 +436,32 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "note pas écrite");
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn unreadable_note_is_set_aside_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = NoteWidget::new(NoteSettings::default());
+        let id = w.s.note;
+        std::fs::create_dir_all(notes_dir(dir.path())).unwrap();
+        std::fs::write(note_path(dir.path(), id), b"{\"texte\": \"abime\"").unwrap();
+        assert_eq!(w.note(dir.path()).text, "");
+        assert!(!w.read_only);
+        let kept: Vec<_> = std::fs::read_dir(notes_dir(dir.path()))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".json.bad-"))
+            .collect();
+        assert_eq!(kept.len(), 1, "fichier illisible mis de côté");
+        assert_eq!(
+            std::fs::read(kept[0].path()).unwrap(),
+            b"{\"texte\": \"abime\"",
+            "contenu intact"
+        );
+        // Une note absente est simplement créée.
+        let mut fresh = NoteWidget::new(NoteSettings::default());
+        fresh.note(dir.path());
+        assert!(!fresh.read_only);
     }
 
     #[test]
