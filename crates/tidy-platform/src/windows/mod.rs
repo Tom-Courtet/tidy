@@ -11,12 +11,14 @@
 //! - [`notify`] : notifications (toasts), lot H.
 //! - [`session`] : verrouillage de la session, veille, inactivité (lot F).
 //! - [`wallpaper`] : fonds d'écran (lot J).
+//! - [`install`] : installation et désinstallation (lot K).
 
 mod desktop;
 mod glass;
 mod icons;
+pub(crate) mod install;
 mod notify;
-mod registry;
+pub(crate) mod registry;
 mod screens;
 mod session;
 mod shell;

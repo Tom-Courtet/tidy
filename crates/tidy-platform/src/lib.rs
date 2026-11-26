@@ -23,6 +23,7 @@ use tidy_core::settings::wallpaper::{Fit, OriginalWallpaper};
 
 mod convert;
 pub mod finder;
+pub mod install;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(any(target_os = "macos", windows)))]
