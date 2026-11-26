@@ -25,6 +25,8 @@ use tidy_core::events::{Event, EventBus};
 
 /// Délai maximal d'une requête.
 pub const TIMEOUT: Duration = Duration::from_secs(5);
+/// Longueur maximale d'un message (une ligne JSON).
+const MAX_LINE: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -130,11 +132,14 @@ pub fn subscribe(
         .spawn(move || {
             let mut reader = BufReader::new(stream);
             loop {
-                match read_line::<Event>(&mut reader) {
-                    Ok(Some(event)) => on_event(event),
-                    Ok(None) => break,
+                match read_message::<Event>(&mut reader) {
+                    Ok(Line::Message(event)) => on_event(event),
+                    // Un événement illisible (trop long, d'une version plus récente)
+                    // est ignoré : l'abonnement continue.
+                    Ok(Line::Bad(why)) => log::warn!("événement ignoré : {why}"),
+                    Ok(Line::End) => break,
                     Err(e) => {
-                        log::warn!("événement illisible : {e:#}");
+                        log::warn!("abonnement coupé : {e}");
                         break;
                     }
                 }
@@ -237,7 +242,12 @@ fn serve_one(
         let events = bus.subscribe();
         for event in events {
             let last = event == Event::Shutdown;
-            if write_line(&mut stream, &event).is_err() || last {
+            // Un événement impossible à envoyer est ignoré (journal) : il ne coupe pas
+            // l'abonnement (le bureau s'arrêterait).
+            let Some(line) = event_line(&event) else {
+                continue;
+            };
+            if write_raw(&mut stream, &line).is_err() || last {
                 break;
             }
         }
@@ -248,17 +258,77 @@ fn serve_one(
 
 /// Écrit un message JSON suivi d'un saut de ligne.
 fn write_line<T: Serialize>(w: &mut impl Write, msg: &T) -> Result<()> {
-    let mut line = serde_json::to_string(msg)?;
-    line.push('\n');
+    let line = serde_json::to_string(msg)?;
+    write_raw(w, &line)
+}
+
+/// Écrit une ligne déjà sérialisée.
+fn write_raw(w: &mut impl Write, line: &str) -> Result<()> {
     w.write_all(line.as_bytes())?;
+    w.write_all(b"\n")?;
     w.flush()?;
     Ok(())
+}
+
+/// Ligne JSON d'un événement, ou `None` (journal) s'il ne peut pas être envoyé :
+/// sérialisation impossible, ou plus long que [`MAX_LINE`].
+fn event_line(event: &Event) -> Option<String> {
+    match serde_json::to_string(event) {
+        Ok(line) if line.len() < MAX_LINE => Some(line),
+        Ok(line) => {
+            log::warn!(
+                "événement trop long ({} octets) : non envoyé aux abonnés",
+                line.len()
+            );
+            None
+        }
+        Err(e) => {
+            log::warn!("événement impossible à envoyer : {e}");
+            None
+        }
+    }
+}
+
+/// Ligne lue sur un abonnement.
+enum Line<T> {
+    Message(T),
+    /// Ligne illisible ou trop longue (ignorée), avec la raison.
+    Bad(String),
+    /// Fin du flux.
+    End,
+}
+
+/// Lit une ligne JSON sans jamais en garder plus de [`MAX_LINE`] octets : une ligne
+/// trop longue est sautée jusqu'à son saut de ligne.
+fn read_message<T: for<'de> Deserialize<'de>>(r: &mut impl BufRead) -> std::io::Result<Line<T>> {
+    let mut buf = Vec::new();
+    let n = std::io::Read::take(&mut *r, MAX_LINE as u64).read_until(b'\n', &mut buf)?;
+    if n == 0 {
+        return Ok(Line::End);
+    }
+    if buf.last() != Some(&b'\n') && buf.len() >= MAX_LINE {
+        // Reste de la ligne : lu et jeté, par morceaux.
+        let mut rest = Vec::new();
+        loop {
+            rest.clear();
+            let k = std::io::Read::take(&mut *r, 1 << 16).read_until(b'\n', &mut rest)?;
+            if k == 0 || rest.last() == Some(&b'\n') {
+                break;
+            }
+        }
+        return Ok(Line::Bad("ligne trop longue".into()));
+    }
+    let text = String::from_utf8_lossy(&buf);
+    Ok(match serde_json::from_str(text.trim_end()) {
+        Ok(msg) => Line::Message(msg),
+        Err(e) => Line::Bad(e.to_string()),
+    })
 }
 
 /// Lit un message JSON (une ligne). `None` : fin de flux.
 fn read_line<T: for<'de> Deserialize<'de>>(r: &mut impl BufRead) -> Result<Option<T>> {
     let mut line = String::new();
-    if std::io::Read::take(&mut *r, 1 << 20).read_line(&mut line)? == 0 {
+    if std::io::Read::take(&mut *r, MAX_LINE as u64).read_line(&mut line)? == 0 {
         return Ok(None);
     }
     Ok(Some(serde_json::from_str(line.trim_end())?))
@@ -497,6 +567,56 @@ mod tests {
         assert_eq!(rx.recv_timeout(TIMEOUT).unwrap(), Event::ToggleDesktop);
         assert_eq!(rx.recv_timeout(TIMEOUT).unwrap(), Event::Shutdown);
         end_rx.recv_timeout(TIMEOUT).unwrap();
+    }
+
+    /// Un événement trop long (ou illisible) est ignoré sans couper l'abonnement.
+    #[test]
+    fn one_bad_event_does_not_end_the_subscription() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let bus = EventBus::default();
+        let lock = lock_instance(&store).unwrap().unwrap();
+        let (listener, auth) = bind(&store, &lock).unwrap();
+        serve(listener, auth, bus.clone(), |_| Response::Ok).unwrap();
+        let (tx, rx) = mpsc::channel();
+        subscribe(&store, move |e| tx.send(e).unwrap(), || {}).unwrap();
+        for _ in 0..100 {
+            if bus.subscriber_count() > 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        bus.publish(Event::Module {
+            module: "essai".into(),
+            action: "gros".into(),
+            data: serde_json::Value::String("x".repeat(MAX_LINE + 10)),
+        });
+        bus.publish(Event::ToggleDesktop);
+        assert_eq!(rx.recv_timeout(TIMEOUT).unwrap(), Event::ToggleDesktop);
+    }
+
+    /// Côté abonné : ligne illisible ou trop longue sautée, la suivante est lue.
+    #[test]
+    fn bad_lines_are_skipped_by_the_reader() {
+        let long = "y".repeat(MAX_LINE + 5);
+        let text = format!(
+            "{{\"type\":\"inconnu_plus_recent\"}}\n{long}\n{}\n",
+            serde_json::to_string(&Event::ToggleDesktop).unwrap()
+        );
+        let mut r = std::io::BufReader::new(text.as_bytes());
+        assert!(matches!(
+            read_message::<Event>(&mut r).unwrap(),
+            Line::Bad(_)
+        ));
+        assert!(matches!(
+            read_message::<Event>(&mut r).unwrap(),
+            Line::Bad(_)
+        ));
+        assert!(matches!(
+            read_message::<Event>(&mut r).unwrap(),
+            Line::Message(Event::ToggleDesktop)
+        ));
+        assert!(matches!(read_message::<Event>(&mut r).unwrap(), Line::End));
     }
 
     #[test]
