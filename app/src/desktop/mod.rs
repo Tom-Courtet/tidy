@@ -29,6 +29,7 @@ mod overlay;
 mod portal;
 mod roll;
 mod textures;
+mod widgets;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -351,6 +352,8 @@ struct Desktop {
     raised_until: HashMap<BoxId, Instant>,
     quick_access: bool,
     icon_sync: IconSync,
+    /// Fenêtres des widgets (lots H et I).
+    widgets: widgets::WidgetHost,
 }
 
 impl Desktop {
@@ -376,6 +379,7 @@ impl Desktop {
                 .and_then(|d| DirWatcher::new(d, &ctx))
         };
         let icon_sync = IconSync::new(store.clone());
+        let widget_host = widgets::WidgetHost::new(&store);
         let mut desktop = Self {
             icons: textures::IconCache::new(ctx.clone()),
             store,
@@ -400,6 +404,7 @@ impl Desktop {
             raised_until: HashMap::new(),
             quick_access: false,
             icon_sync,
+            widgets: widget_host,
         };
         desktop.rescan_desktop();
         desktop.sync_windows();
@@ -1717,6 +1722,22 @@ impl eframe::App for Desktop {
                     });
                 }
             }
+        }
+
+        // Widgets.
+        let mut widget_commands = Vec::new();
+        self.widgets.show(
+            &ctx,
+            &self.state,
+            &self.screens,
+            self.hidden,
+            &mut widget_commands,
+        );
+        if !widget_commands.is_empty() {
+            for command in widget_commands {
+                self.state.apply(command);
+            }
+            self.save(false);
         }
 
         // Fenêtres flottantes.

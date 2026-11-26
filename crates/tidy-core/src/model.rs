@@ -283,6 +283,12 @@ pub struct DeskBox {
     /// Raccourci global qui fait apparaître la boîte (format de `global-hotkey`).
     #[serde(default)]
     pub hotkey: Option<String>,
+    /// Gelée : ni déplacement ni redimensionnement (« Geler la boîte »).
+    #[serde(default)]
+    pub frozen: bool,
+    /// Champ de recherche dans la barre de titre (filtre les éléments affichés).
+    #[serde(default)]
+    pub search_in_title: bool,
 }
 
 impl DeskBox {
@@ -302,6 +308,8 @@ impl DeskBox {
             exclude_from_quick_hide: false,
             exclude_from_quick_access: false,
             hotkey: None,
+            frozen: false,
+            search_in_title: false,
         }
     }
 
@@ -390,15 +398,32 @@ pub enum DesktopCommand {
         items: Vec<(ItemRef, Option<BoxId>)>,
     },
     /// Éléments arrivés sans règle correspondante (bandeau « non affectées »).
-    SetUnassigned { items: Vec<ItemRef> },
+    SetUnassigned {
+        items: Vec<ItemRef>,
+    },
     /// Ajoute une boîte (ou la remplace si l'identifiant existe déjà).
-    UpsertBox { b: DeskBox },
+    UpsertBox {
+        b: DeskBox,
+    },
     /// Supprime une boîte ; ses éléments reviennent au bureau.
-    RemoveBox { id: BoxId },
+    RemoveBox {
+        id: BoxId,
+    },
     /// Remplace les règles.
-    SetRules { rules: Vec<Rule> },
+    SetRules {
+        rules: Vec<Rule>,
+    },
     /// Remplace tout l'état (annuler un rangement, restaurer un instantané).
-    Replace { state: Box<DesktopState> },
+    Replace {
+        state: Box<DesktopState>,
+    },
+    /// Ajoute un widget (ou le remplace si l'identifiant existe déjà).
+    UpsertWidget {
+        w: WidgetInstance,
+    },
+    RemoveWidget {
+        id: Uuid,
+    },
 }
 
 impl DesktopState {
@@ -437,6 +462,13 @@ impl DesktopState {
             }
             DesktopCommand::SetRules { rules } => self.rules = rules,
             DesktopCommand::Replace { state } => *self = *state,
+            DesktopCommand::UpsertWidget { w } => {
+                match self.widgets.iter_mut().find(|x| x.id == w.id) {
+                    Some(existing) => *existing = w,
+                    None => self.widgets.push(w),
+                }
+            }
+            DesktopCommand::RemoveWidget { id } => self.widgets.retain(|w| w.id != id),
         }
     }
 

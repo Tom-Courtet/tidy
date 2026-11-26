@@ -1,4 +1,12 @@
 //! Réglages de l'application (`config.json`).
+//!
+//! Les sections des modules de la vague 2 et 3 vivent dans leurs propres fichiers
+//! (`settings/*.rs`), un par lot.
+
+pub mod search;
+pub mod vault;
+pub mod wallpaper;
+pub mod widgets;
 
 use std::collections::BTreeMap;
 
@@ -221,6 +229,10 @@ pub struct Settings {
     pub snapshots: SnapshotSettings,
     /// Apparence des boîtes sans apparence propre.
     pub default_appearance: Appearance,
+    pub search: search::SearchSettings,
+    pub vault: vault::VaultSettings,
+    pub widgets: widgets::WidgetSettings,
+    pub wallpaper: wallpaper::WallpaperSettings,
 }
 
 impl Default for Settings {
@@ -238,6 +250,10 @@ impl Default for Settings {
             layout: LayoutSettings::default(),
             snapshots: SnapshotSettings::default(),
             default_appearance: Appearance::default(),
+            search: Default::default(),
+            vault: Default::default(),
+            widgets: Default::default(),
+            wallpaper: Default::default(),
         }
     }
 }

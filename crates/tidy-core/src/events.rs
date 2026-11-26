@@ -73,6 +73,16 @@ pub enum Event {
     },
     /// L'agent s'arrête : les autres processus se ferment.
     Shutdown,
+    /// Message d'un module des vagues 2 et 3 (dispositions, recherche, coffre, widgets,
+    /// fonds d'écran), relayé tel quel par l'agent à tous les abonnés. `module` :
+    /// `"layouts"`, `"search"`, `"vault"`, `"widgets"`, `"wallpaper"`… ; `action` et
+    /// `data` sont propres au module.
+    Module {
+        module: String,
+        action: String,
+        #[serde(default)]
+        data: serde_json::Value,
+    },
 }
 
 /// Distributeur d'événements dans un processus. Clonable ; les abonnés disparus sont

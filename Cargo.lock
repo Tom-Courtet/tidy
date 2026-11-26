@@ -2380,6 +2380,7 @@ dependencies = [
  "tidy-core",
  "tidy-platform",
  "tidy-ui",
+ "tidy-widgets",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -2453,6 +2454,13 @@ version = "0.1.0"
 [[package]]
 name = "tidy-widgets"
 version = "0.1.0"
+dependencies = [
+ "egui",
+ "serde",
+ "serde_json",
+ "tidy-core",
+ "tidy-ui",
+]
 
 [[package]]
 name = "tiff"

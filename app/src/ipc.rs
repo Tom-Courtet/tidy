@@ -61,6 +61,15 @@ pub enum Request {
     /// Recevoir les événements de l'agent sur cette connexion, jusqu'à sa fermeture.
     Subscribe,
     Quit,
+    /// Demande à un module des vagues 2 et 3 (`"layouts"`, `"search"`, `"vault"`,
+    /// `"widgets"`, `"wallpaper"`…). Traitée par `agent::modules::handle` ; à défaut,
+    /// relayée à tous les abonnés en [`tidy_core::events::Event::Module`].
+    Module {
+        module: String,
+        action: String,
+        #[serde(default)]
+        data: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,7 +77,13 @@ pub enum Request {
 pub enum Response {
     Ok,
     Status(Status),
-    Error { message: String },
+    Error {
+        message: String,
+    },
+    /// Réponse d'un module, propre à lui.
+    Data {
+        data: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

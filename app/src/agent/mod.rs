@@ -10,6 +10,7 @@
 //! - **fil de surveillance** ([`supervisor`]) : processus du bureau, icônes du Finder.
 
 mod hotkeys;
+pub mod modules;
 pub mod organizer;
 mod supervisor;
 mod tray;
@@ -116,6 +117,11 @@ pub fn run(store: Store, open_manager: bool) -> Result<()> {
                     Ok(Response::Ok)
                 }
                 Request::Quit => send(UserEvent::Quit),
+                Request::Module {
+                    module,
+                    action,
+                    data,
+                } => Ok(modules::handle(&store, &bus, module, action, data)),
             };
             result.unwrap_or_else(|_| Response::Error {
                 message: "agent en cours d'arrêt".into(),

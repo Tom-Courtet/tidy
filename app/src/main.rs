@@ -20,6 +20,8 @@ mod ipc;
 mod lang;
 mod logging;
 mod manager;
+mod search;
+mod wallpaper;
 
 use anyhow::Result;
 use ipc::Request;
@@ -33,6 +35,8 @@ Usage :
   tidy --background       lance l'agent sans ouvrir la fenêtre principale
   tidy --manager [page]   ouvre la fenêtre principale (page : options, diagnostic…)
   tidy --desktop          surfaces du bureau (lancé par l'agent)
+  tidy --search [texte]   lanceur de recherche rapide
+  tidy --wallpaper        fonds d'écran animés (lancé par l'agent)
   tidy --create-box       crée une boîte sous la souris (menu du bureau)
   tidy --toggle-desktop   masque ou montre le bureau (boîtes et icônes)
   tidy --organize         range tout le bureau selon les règles (démarrage rapide si
@@ -53,6 +57,8 @@ enum Role {
     Agent { background: bool },
     Desktop,
     Manager,
+    Search,
+    Wallpaper,
     RestoreFinder,
     CreateBox,
     ToggleDesktop,
@@ -72,6 +78,8 @@ fn parse_role(arg: Option<&str>) -> Option<Role> {
         Some("--background") => Role::Agent { background: true },
         Some("--desktop") => Role::Desktop,
         Some("--manager") => Role::Manager,
+        Some("--search") => Role::Search,
+        Some("--wallpaper") => Role::Wallpaper,
         Some("--restore-finder" | "--restore-desktop") => Role::RestoreFinder,
         Some("--create-box") => Role::CreateBox,
         Some("--toggle-desktop") => Role::ToggleDesktop,
@@ -110,6 +118,8 @@ fn main() -> Result<()> {
             agent::run(store, !background)
         }
         Role::Desktop => desktop::run(store),
+        Role::Search => search::run(store, std::env::args().nth(2)),
+        Role::Wallpaper => wallpaper::run(store),
         Role::Manager => {
             let page = std::env::args().nth(2);
             let page = page.as_deref().and_then(manager::Page::from_arg);
@@ -257,6 +267,8 @@ fn role_name(role: Role) -> &'static str {
         Role::Agent { .. } => "agent",
         Role::Desktop => "desktop",
         Role::Manager => "manager",
+        Role::Search => "search",
+        Role::Wallpaper => "wallpaper",
         _ => "cli",
     }
 }

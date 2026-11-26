@@ -23,6 +23,7 @@ serde_json.workspace = true
 tidy-core.workspace = true
 tidy-platform.workspace = true
 tidy-ui.workspace = true
+tidy-widgets.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
