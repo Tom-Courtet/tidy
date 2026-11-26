@@ -210,6 +210,28 @@ fn failed(e: anyhow::Error) -> String {
     t!("layouts.error", error = format!("{e:#}"))
 }
 
+/// Instantané de sécurité de l'état actuel, avant qu'un autre module le remplace
+/// (« Tout annuler » du rangement) : la disposition d'avant reste restaurable.
+pub(super) fn safety_snapshot(store: &Store, bus: &EventBus) -> Result<(), String> {
+    let _busy = BUSY.lock().unwrap_or_else(|p| p.into_inner());
+    let current = current_state(store)?;
+    let keep = store.load::<Settings>().snapshots.keep;
+    let taken = Layouts::new(store.clone())
+        .take(
+            &current,
+            SnapshotKind::Auto,
+            SnapshotReason::BeforeRestore,
+            "",
+            keep,
+            Timestamp::now(),
+        )
+        .map_err(|e| t!("layouts.error_safety", error = format!("{e:#}")))?;
+    if matches!(taken, Taken::New(_)) {
+        publish_changed(bus, false);
+    }
+    Ok(())
+}
+
 fn current_state(store: &Store) -> Result<DesktopState, String> {
     read_desktop(store).ok_or_else(|| t!("layouts.error_desktop_unreadable").to_owned())
 }

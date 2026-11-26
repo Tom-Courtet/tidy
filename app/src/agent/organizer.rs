@@ -281,6 +281,9 @@ fn try_undo(store: &Store, bus: &EventBus) -> Result<(), String> {
         .map_err(anyhow::Error::from)
         .and_then(tidy_core::store::migrate::<DesktopState>)
         .map_err(|e| t!("organize.undo_unreadable", error = format!("{e:#}")))?;
+    // L'état actuel (rangement fait, puis retouches éventuelles) reste restaurable
+    // depuis les instantanés.
+    super::layouts::safety_snapshot(store, bus)?;
     send(
         store,
         bus,
@@ -474,8 +477,19 @@ mod tests {
         let state: DesktopState = store.load();
         assert!(state.box_of(&ItemRef("musique.mp3".into())).is_some());
 
+        let organized: DesktopState = store.load();
         assert_eq!(undo(&store, &bus), Response::Ok);
         assert_eq!(store.load::<DesktopState>(), before);
+        // L'état rangé a été gardé dans un instantané de sécurité.
+        let layouts = tidy_core::layouts::Layouts::new(store.clone());
+        let snapshots = layouts.index().snapshots;
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            tidy_core::layouts::load_state(&store, snapshots[0].id)
+                .unwrap()
+                .boxes,
+            organized.boxes
+        );
         assert!(!data.path().join(BEFORE_ORGANIZE_FILE).exists());
         assert!(try_apply_rules(&store, &bus, true, &[]).is_err());
     }
