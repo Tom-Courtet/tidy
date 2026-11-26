@@ -193,17 +193,23 @@ fn placed(m: &mut Manager, ui: &mut egui::Ui, st: &mut PageState) {
                         .clicked()
                     {
                         exclude = !exclude;
-                        let mut w = w.clone();
-                        w.exclude_from_quick_hide = exclude;
-                        m.send(DesktopCommand::UpsertWidget { w });
+                        // Seulement le drapeau : les réglages et la place du widget,
+                        // peut-être changés sur le bureau depuis, restent ceux du bureau.
+                        m.send(DesktopCommand::SetWidgetFlags {
+                            id: w.id,
+                            frozen: None,
+                            exclude_from_quick_hide: Some(exclude),
+                        });
                     }
                     if widgets::choice(ui, w.frozen, t!("widgets.freeze"))
                         .on_hover_text(t!("widgets.freeze_hint"))
                         .clicked()
                     {
-                        let mut w = w.clone();
-                        w.frozen = !w.frozen;
-                        m.send(DesktopCommand::UpsertWidget { w });
+                        m.send(DesktopCommand::SetWidgetFlags {
+                            id: w.id,
+                            frozen: Some(!w.frozen),
+                            exclude_from_quick_hide: None,
+                        });
                     }
                 });
             });

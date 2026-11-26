@@ -714,20 +714,21 @@ fn forget_screens(m: &mut Manager, screens: &[Screen]) {
     if screens.is_empty() {
         return;
     }
-    let changed: Vec<_> = m
+    // Compte pour le message seulement : le bureau applique la commande à son état à
+    // jour (une copie des boîtes, peut-être périmée, écraserait leurs changements).
+    let count = m
         .desktop
         .boxes
         .iter()
-        .filter_map(|b| {
-            let mut b = b.clone();
-            layouts::forget_other_screen_sets(&mut b.placement, screens).then_some(b)
+        .filter(|b| {
+            let mut placement = b.placement.clone();
+            layouts::forget_other_screen_sets(&mut placement, screens)
         })
-        .collect();
-    let count = changed.len();
-    for b in changed {
-        if !m.send(DesktopCommand::UpsertBox { b }) {
-            return;
-        }
+        .count();
+    if !m.send(DesktopCommand::ForgetOtherScreenSets {
+        screens: screens.to_vec(),
+    }) {
+        return;
     }
     m.show_notice(t!("layouts.forgotten", count = count));
 }

@@ -424,6 +424,21 @@ pub enum DesktopCommand {
     RemoveWidget {
         id: Uuid,
     },
+    /// Change seulement les drapeaux d'un widget (« Geler », « Exclure du masquage
+    /// rapide »), appliqués à l'état à jour : la fenêtre principale n'envoie plus une
+    /// copie peut-être périmée de tout le widget. `None` : inchangé.
+    SetWidgetFlags {
+        id: Uuid,
+        #[serde(default)]
+        frozen: Option<bool>,
+        #[serde(default)]
+        exclude_from_quick_hide: Option<bool>,
+    },
+    /// Oublie, pour chaque boîte, les positions des autres configurations d'écrans que
+    /// `screens` (« réinitialiser les autres résolutions »), sur l'état à jour.
+    ForgetOtherScreenSets {
+        screens: Vec<Screen>,
+    },
 }
 
 impl DesktopState {
@@ -469,6 +484,27 @@ impl DesktopState {
                 }
             }
             DesktopCommand::RemoveWidget { id } => self.widgets.retain(|w| w.id != id),
+            DesktopCommand::SetWidgetFlags {
+                id,
+                frozen,
+                exclude_from_quick_hide,
+            } => {
+                if let Some(w) = self.widgets.iter_mut().find(|w| w.id == id) {
+                    if let Some(frozen) = frozen {
+                        w.frozen = frozen;
+                    }
+                    if let Some(exclude) = exclude_from_quick_hide {
+                        w.exclude_from_quick_hide = exclude;
+                    }
+                }
+            }
+            DesktopCommand::ForgetOtherScreenSets { screens } => {
+                if !screens.is_empty() {
+                    for b in &mut self.boxes {
+                        crate::layouts::forget_other_screen_sets(&mut b.placement, &screens);
+                    }
+                }
+            }
         }
     }
 
@@ -579,6 +615,61 @@ mod tests {
         });
         assert_eq!(state.box_of(&item), None);
         assert!(state.loose.contains_key(&item));
+    }
+
+    /// Commandes ciblées de la fenêtre principale : appliquées à l'état à jour, elles ne
+    /// touchent que ce qu'elles nomment.
+    #[test]
+    fn targeted_commands_keep_newer_changes() {
+        let mut state = DesktopState::default();
+        let w = WidgetInstance {
+            id: Uuid::new_v4(),
+            kind: "notes".into(),
+            settings: serde_json::json!({ "texte": "ancien" }),
+            placement: Placement::default(),
+            frozen: false,
+            exclude_from_quick_hide: false,
+        };
+        state.widgets.push(w.clone());
+        // Le bureau change les réglages après que la fenêtre principale a lu l'état.
+        state.widgets[0].settings = serde_json::json!({ "texte": "récent" });
+        state.apply(DesktopCommand::SetWidgetFlags {
+            id: w.id,
+            frozen: Some(true),
+            exclude_from_quick_hide: None,
+        });
+        assert!(state.widgets[0].frozen);
+        assert!(!state.widgets[0].exclude_from_quick_hide);
+        assert_eq!(state.widgets[0].settings["texte"], "récent");
+        state.apply(DesktopCommand::SetWidgetFlags {
+            id: w.id,
+            frozen: None,
+            exclude_from_quick_hide: Some(true),
+        });
+        assert!(state.widgets[0].frozen && state.widgets[0].exclude_from_quick_hide);
+
+        // Autres résolutions oubliées, nom de la boîte (changé depuis) gardé.
+        let laptop = screen("intégré", 0.0, 1512.0, 982.0);
+        let tv = screen("tv", 1512.0, 3840.0, 2160.0);
+        let mut b = DeskBox::new("A");
+        let r = Rect::new(10.0, 10.0, 300.0, 200.0);
+        b.placement
+            .remember(std::slice::from_ref(&laptop), &laptop, r);
+        b.placement
+            .remember(&[laptop.clone(), tv.clone()], &laptop, r);
+        state.boxes.push(b);
+        state.boxes[0].name = "Renommée".into();
+        state.apply(DesktopCommand::ForgetOtherScreenSets {
+            screens: vec![laptop.clone()],
+        });
+        assert_eq!(state.boxes[0].placement.by_screen_set.len(), 1);
+        assert_eq!(state.boxes[0].name, "Renommée");
+
+        let cmd = DesktopCommand::ForgetOtherScreenSets {
+            screens: vec![laptop],
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(serde_json::from_str::<DesktopCommand>(&json).unwrap(), cmd);
     }
 
     #[test]
