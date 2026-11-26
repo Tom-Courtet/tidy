@@ -259,7 +259,10 @@ impl Controller {
             enabled: self.settings.enabled,
             video_running: self.player.running(),
             gave_up: self.player.gave_up(),
-            paused: self.paused,
+            // La pause ne concerne que les vidéos et la playlist.
+            paused: self
+                .paused
+                .filter(|_| !self.video.screens.is_empty() || self.settings.uses_playlist()),
             original_saved: self.store.path_of::<OriginalWallpaper>().exists(),
             next_in: self
                 .settings

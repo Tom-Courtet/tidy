@@ -214,6 +214,9 @@ fn create_surface(
         .with_title(TITLE)
         .with_decorations(false)
         .with_resizable(false)
+        // Montrée par la plateforme une fois placée derrière les icônes : pas d'éclair
+        // d'une fenêtre ordinaire par-dessus les applis.
+        .with_visible(false)
         .with_position(LogicalPosition::new(f64::from(f.x), f64::from(f.y)))
         .with_inner_size(LogicalSize::new(f64::from(f.width), f64::from(f.height)));
     let window = event_loop
