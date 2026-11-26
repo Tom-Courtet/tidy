@@ -290,10 +290,8 @@ pub fn show_menu(window_title: &str, paths: &[PathBuf]) -> Result<bool> {
     if popup.0.is_null() {
         bail!("menu impossible à créer");
     }
-    let shift = key_down(VK_SHIFT);
-    let ctrl = key_down(VK_CONTROL);
     let mut flags = CMF_NORMAL;
-    if shift {
+    if key_down(VK_SHIFT) {
         // Maj : entrées étendues (« Copier en tant que chemin d'accès »…), comme
         // l'Explorateur.
         flags |= CMF_EXTENDEDVERBS;
@@ -332,10 +330,13 @@ pub fn show_menu(window_title: &str, paths: &[PathBuf]) -> Result<bool> {
     }
     let offset = (command as u32 - FIRST_COMMAND) as usize;
     let mut mask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
-    if shift {
+    // État des touches au moment du choix, pas à l'ouverture du menu : Maj relâchée
+    // avant de cliquer « Supprimer » doit donner la corbeille, comme dans
+    // l'Explorateur (Maj transmise rend la suppression définitive).
+    if key_down(VK_SHIFT) {
         mask |= CMIC_MASK_SHIFT_DOWN;
     }
-    if ctrl {
+    if key_down(VK_CONTROL) {
         mask |= CMIC_MASK_CONTROL_DOWN;
     }
     let invoke = CMINVOKECOMMANDINFOEX {
