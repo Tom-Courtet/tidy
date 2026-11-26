@@ -6,9 +6,11 @@
 //! - [`icons`] : positions des icônes (rangées = déplacées hors de l'écran) ;
 //! - [`shell`] : icônes des fichiers, menu contextuel et glisser-déposer du Shell ;
 //! - [`watch`] : changements d'écrans ;
-//! - [`registry`] : menu contextuel du bureau, démarrage avec la session.
+//! - [`registry`] : menu contextuel du bureau, démarrage avec la session ;
+//! - [`glass`] : fond « verre dépoli » des boîtes (lot M).
 
 mod desktop;
+mod glass;
 mod icons;
 mod registry;
 mod screens;
@@ -177,6 +179,12 @@ impl DesktopPlatform for WindowsPlatform {
 
     fn set_login_item(&self, enabled: bool) -> Result<LoginState> {
         registry::set_login(enabled)
+    }
+
+    // --- Lot M ---
+
+    fn set_window_glass(&self, title: &str, enabled: bool, corner_radius: f32) -> bool {
+        glass::set_glass(title, enabled, corner_radius)
     }
 }
 

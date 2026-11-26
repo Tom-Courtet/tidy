@@ -163,6 +163,17 @@ pub trait DesktopPlatform: Send + Sync {
 
     fn login_item(&self) -> LoginState;
     fn set_login_item(&self, enabled: bool) -> Result<LoginState>;
+
+    // --- Lot M (boîtes). Valeur par défaut : « pas disponible ». ---
+
+    /// Fond « verre dépoli » (flou de ce qui est derrière) pour la fenêtre `title`,
+    /// aux coins arrondis de `corner_radius` points quand l'OS le permet ; `enabled`
+    /// à `false` le retire. Rend `true` si l'effet est actif : l'appelant dessine
+    /// alors son fond plus transparent. `false` : pas disponible ou refusé par l'OS
+    /// (le fond reste ordinaire).
+    fn set_window_glass(&self, _title: &str, _enabled: bool, _corner_radius: f32) -> bool {
+        false
+    }
 }
 
 /// macOS : appelle `on_reopen` quand l'utilisateur rouvre Tidy.app alors qu'il tourne
