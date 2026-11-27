@@ -41,6 +41,8 @@ pub enum Page {
     Rules,
     /// « Règles ▸ Ranger ici ▸ » : les catégories de la page Rangement.
     RulesTargets,
+    /// « Ajouter un élément système ▸ » (Corbeille, Ce PC… ; Windows).
+    System,
 }
 
 /// Ce que le menu ☰ doit savoir en plus de la boîte.
@@ -199,6 +201,14 @@ pub fn box_menu(b: &DeskBox, page: Page, cx: &MenuCx) -> Vec<Entry> {
                     t!("box_extra.menu_rules"),
                     EntryKind::Open(Page::Rules),
                 ));
+                // Corbeille, Ce PC… : objets du bureau de Windows, pas des fichiers.
+                if cfg!(windows) {
+                    e.push(item(
+                        icons::DRIVE,
+                        t!("system_items.menu_add"),
+                        EntryKind::Open(Page::System),
+                    ));
+                }
             }
             e.extend([
                 Entry::Separator,
@@ -265,6 +275,11 @@ pub fn box_menu(b: &DeskBox, page: Page, cx: &MenuCx) -> Vec<Entry> {
                     EntryKind::Do(Action::RefreshIcons { b: id }),
                 ),
                 item(
+                    icons::EYE_OFF,
+                    t!("system_items.menu_hide_box"),
+                    EntryKind::Do(Action::HideBox { b: id }),
+                ),
+                item(
                     icons::EDIT,
                     t!("box.menu_rename_box"),
                     EntryKind::Do(Action::StartRenameBox { b: id }),
@@ -284,6 +299,22 @@ pub fn box_menu(b: &DeskBox, page: Page, cx: &MenuCx) -> Vec<Entry> {
                     danger: true,
                 },
             ]);
+            e
+        }
+        Page::System => {
+            let mut e = vec![back(), Entry::Separator];
+            for item in tidy_core::system_items::ALL {
+                let present = b.items().any(|i| i.0.eq_ignore_ascii_case(item.id));
+                e.push(check(
+                    icons::DRIVE,
+                    tidy_ui::i18n::tr(item.label_key),
+                    present,
+                    Action::AddSystemItem {
+                        b: id,
+                        id: item.id.to_owned(),
+                    },
+                ));
+            }
             e
         }
         Page::Create => vec![

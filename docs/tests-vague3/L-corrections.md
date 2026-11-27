@@ -60,3 +60,15 @@ Journaux : `<données>\logs\`.
 - [ ] Calendrier avec un rappel à 5 minutes, relancer Tidy pendant ces 5 minutes : un seul rappel.
 - [ ] Calendrier en erreur (réseau coupé), cliquer plusieurs fois « Réessayer » : un seul chargement (journal).
 - [ ] Chat IA : « Arrêter » pendant que la réponse arrive, ou avant qu'elle commence : l'arrêt est immédiat (« Arrêté »).
+
+## Éléments système et boîte cachée (27/11)
+- [ ] Menu ☰ d'une boîte > « Ajouter un élément système » > Corbeille : la Corbeille apparaît dans la boîte et son icône disparaît du bureau de Windows.
+- [ ] Double-clic sur la Corbeille dans la boîte : elle s'ouvre ; clic droit : menu de Windows avec « Vider la Corbeille ».
+- [ ] Renommer ou « Mettre à la corbeille » la Corbeille depuis la boîte : refusé avec un message.
+- [ ] Glisser la Corbeille d'une boîte à une autre : elle change de boîte.
+- [ ] Recocher la Corbeille dans le menu : elle quitte la boîte et revient sur le bureau.
+- [ ] Même chose avec « Ce PC ».
+- [ ] Menu ☰ > « Cacher la boîte » : la boîte disparaît, ses fichiers restent masqués du bureau de Windows.
+- [ ] Fenêtre principale > Boîtes : la boîte porte « cachée » ; l'interrupteur « Boîte cachée » la fait revenir.
+- [ ] Une boîte cachée avec un raccourci : le raccourci la montre un moment, puis elle se cache à nouveau.
+- [ ] « Ranger ici… » vers une boîte cachée : les nouveaux fichiers de ces catégories y vont et disparaissent du bureau.

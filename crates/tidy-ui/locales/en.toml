@@ -1112,3 +1112,17 @@ tray_wallpapers = "Wallpapers"
 tray_next_wallpaper = "Next wallpaper"
 tray_manage_wallpapers = "Manage wallpapers…"
 tray_lock_vault = "Lock the private box"
+
+# Windows desktop system items and hidden boxes.
+[system_items]
+recycle_bin = "Recycle Bin"
+this_pc = "This PC"
+user_folder = "User folder"
+network = "Network"
+control_panel = "Control Panel"
+menu_add = "Add a system item"
+locked = "A system item can't be renamed or moved to the Recycle Bin."
+menu_hide_box = "Hide the box"
+hidden_box = "Hidden box"
+hidden_box_hint = "It no longer shows on the desktop, but its items stay boxed and hidden from the Windows desktop. Its shortcut shows it for a moment."
+hidden_badge = "hidden"

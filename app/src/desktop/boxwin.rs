@@ -289,7 +289,7 @@ pub fn draw(
             !v.sections
                 .iter()
                 .flat_map(|s| s.items.iter())
-                .any(|i| search::matches(&i.name, q))
+                .any(|i| search::matches(items::display_name(&i.name), q))
         });
     let mut hovered_item = None;
     if let Some(dir) = v.dir.filter(|_| !v.custom_body) {

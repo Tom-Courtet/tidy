@@ -499,6 +499,13 @@ impl Desktop {
                     .into_iter()
                     .map(|(e, _)| (e.info.name.clone(), e.info))
                     .collect();
+                // Éléments système (Corbeille, Ce PC…) : rangeables comme des fichiers.
+                if cfg!(windows) {
+                    for item in tidy_core::system_items::ALL {
+                        self.files
+                            .insert(item.id.to_owned(), items::system_item_info(item));
+                    }
+                }
                 true
             }
             Err(e) => {
@@ -921,8 +928,17 @@ impl Desktop {
     }
 
     /// Boîte affichée sous `p` (coordonnées globales).
+    /// La boîte a une fenêtre visible : pas cachée, ou montrée un moment par son
+    /// raccourci.
+    fn is_shown(&self, b: &DeskBox) -> bool {
+        !b.hidden || self.raised_until.contains_key(&b.id)
+    }
+
     fn box_under(&self, p: Point) -> Option<BoxId> {
         self.state.boxes.iter().rev().find_map(|b| {
+            if !self.is_shown(b) {
+                return None;
+            }
             let win = self.windows.get(&b.id)?;
             win.shown(&self.screens).contains(p).then_some(b.id)
         })
@@ -1008,6 +1024,11 @@ impl Desktop {
                 .windows
                 .iter()
                 .filter(|(other, _)| **other != id)
+                .filter(|(other, _)| {
+                    self.state
+                        .find_box(**other)
+                        .is_some_and(|b| self.is_shown(b))
+                })
                 .map(|(_, w)| w.shown(&self.screens))
                 .filter(|r| screen.frame.contains(center(*r)))
                 .collect();
@@ -1101,6 +1122,11 @@ impl Desktop {
         };
         if self.apply_extra(&action) {
             self.generation += 1;
+            return;
+        }
+        // Un élément système ne se renomme pas et ne va pas à la corbeille.
+        if let Some(b) = items::touches_system_item(&action) {
+            self.notice(b, t!("system_items.locked"));
             return;
         }
         let platform = tidy_platform::current();
@@ -1216,7 +1242,15 @@ impl Desktop {
                     .get(&b)
                     .map(|w| w.title.clone())
                     .unwrap_or_default();
-                match platform.start_file_drag(&title, &paths) {
+                // Élément système (Corbeille…) : pas de glisser du système, qui ne dirait
+                // pas à la boîte visée ce qu'on lui dépose ; glisser interne de Tidy.
+                let system = names.iter().any(|n| tidy_core::system_items::is_system(n));
+                let dragged = if system {
+                    Ok(false)
+                } else {
+                    platform.start_file_drag(&title, &paths)
+                };
+                match dragged {
                     Ok(true) => {}
                     _ => {
                         self.drag = Some(InternalDrag {
@@ -1268,6 +1302,23 @@ impl Desktop {
                 self.edit_box(b, |x| x.sort.group_by_date = !x.sort.group_by_date);
             }
             Action::SetView { b, view } => self.edit_box(b, |x| x.view = view),
+            Action::AddSystemItem { b, id } => {
+                let Some(x) = self.state.find_box(b) else {
+                    return;
+                };
+                // Coché dans le menu : déjà là, le retirer (il revient au bureau).
+                if x.items().any(|i| i.0.eq_ignore_ascii_case(&id)) {
+                    ops::remove_from_box(&mut self.state, &[id]);
+                } else {
+                    let tab = x.active_tab;
+                    ops::assign_to_tab(&mut self.state, &[id], b, tab, None);
+                }
+                self.save(true);
+            }
+            Action::HideBox { b } => {
+                self.raised_until.remove(&b);
+                self.edit_box(b, |x| x.hidden = true);
+            }
             Action::CompactGrid { b } => self.edit_box(b, |x| {
                 let tab = x.active_tab.min(x.tabs.len().saturating_sub(1));
                 if let Some(t) = x.tabs.get_mut(tab) {
@@ -1791,7 +1842,7 @@ impl eframe::App for Desktop {
                 continue;
             };
             let look = self.look(b);
-            let visible = !self.hidden || b.exclude_from_quick_hide;
+            let visible = (!self.hidden || b.exclude_from_quick_hide) && self.is_shown(b);
             let portal_view = self.portals.get(&id).map(|p| PortalView {
                 crumbs: p.crumbs(),
                 error: p.error,
@@ -1926,7 +1977,13 @@ impl eframe::App for Desktop {
             self.apply(action);
         }
 
-        if !self.ready_sent && !self.hidden && self.windows.values().all(|w| w.placed) {
+        let placed = self
+            .state
+            .boxes
+            .iter()
+            .filter(|b| self.is_shown(b))
+            .all(|b| self.windows.get(&b.id).is_none_or(|w| w.placed));
+        if !self.ready_sent && !self.hidden && placed {
             self.ready_sent = true;
             let store = self.store.clone();
             std::thread::spawn(move || {

@@ -96,6 +96,15 @@ pub enum Action {
         b: BoxId,
         view: ViewMode,
     },
+    /// Ranger un élément système (Corbeille, Ce PC…) dans la boîte.
+    AddSystemItem {
+        b: BoxId,
+        id: String,
+    },
+    /// Cacher la boîte (ses éléments restent rangés).
+    HideBox {
+        b: BoxId,
+    },
     /// Grille libre : supprimer les cases vides (les éléments se suivent à nouveau).
     CompactGrid {
         b: BoxId,

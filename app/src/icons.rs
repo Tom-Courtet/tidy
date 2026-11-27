@@ -17,7 +17,14 @@ pub fn boxed_paths(state: &DesktopState) -> Vec<PathBuf> {
         .boxes
         .iter()
         .flat_map(|b| b.items())
-        .filter_map(|item| resolve_desktop_item(&dirs, &item.0))
+        .filter_map(|item| {
+            // Élément système (Corbeille…) : l'Explorateur le nomme `::{CLSID}`.
+            if tidy_core::system_items::is_system(&item.0) {
+                Some(PathBuf::from(&item.0))
+            } else {
+                resolve_desktop_item(&dirs, &item.0)
+            }
+        })
         .collect()
 }
 

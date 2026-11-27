@@ -112,8 +112,11 @@ impl ItemDir {
         Self { main, public: None }
     }
 
-    /// Chemin de l'élément `name`.
+    /// Chemin de l'élément `name` (élément système : son nom d'analyse `::{…}`).
     pub fn join(&self, name: &str) -> PathBuf {
+        if tidy_core::system_items::is_system(name) {
+            return PathBuf::from(name);
+        }
         match &self.public {
             Some((dir, names)) if names.contains(name) => dir.join(name),
             _ => self.main.join(name),
@@ -126,6 +129,42 @@ impl ItemDir {
             Some((dir, names)) if names.contains(name) => dir,
             _ => &self.main,
         }
+    }
+}
+
+/// Fiche d'un élément système (Corbeille, Ce PC…) : rangé avec les dossiers.
+pub fn system_item_info(item: tidy_core::system_items::SystemItem) -> ItemInfo {
+    ItemInfo {
+        name: item.id.to_owned(),
+        category: Category::Folder,
+        size: 0,
+        modified: None,
+        uti: None,
+        is_dir: true,
+    }
+}
+
+/// Nom affiché d'un élément : son nom de fichier, ou le libellé d'un élément système.
+pub fn display_name(name: &str) -> &str {
+    match tidy_core::system_items::find(name) {
+        Some(item) => tidy_ui::i18n::tr(item.label_key),
+        None => name,
+    }
+}
+
+/// Boîte d'une action qui renommerait ou mettrait à la corbeille un élément système
+/// (refusée).
+pub fn touches_system_item(action: &Action) -> Option<BoxId> {
+    let is = tidy_core::system_items::is_system;
+    match action {
+        Action::StartRename { b, name } if is(name) => Some(*b),
+        Action::Rename { b, old, .. } if is(old) => Some(*b),
+        Action::AskTrash { b, names } | Action::Trash { b, names }
+            if names.iter().any(|n| is(n)) =>
+        {
+            Some(*b)
+        }
+        _ => None,
     }
 }
 
@@ -356,7 +395,10 @@ pub fn show(
     let order: Vec<String> = sections
         .iter()
         .flat_map(|s| s.items.iter())
-        .filter(|i| v.filter.is_none_or(|q| super::search::matches(&i.name, q)))
+        .filter(|i| {
+            v.filter
+                .is_none_or(|q| super::search::matches(display_name(&i.name), q))
+        })
         .map(|i| i.name.clone())
         .collect();
     st.selected.retain(|n| order.contains(n));
@@ -445,7 +487,7 @@ fn grid(
         // Recherche en grille libre : l'élément garde sa case, caché s'il ne correspond
         // pas.
         if v.filter
-            .is_some_and(|q| !super::search::matches(&info.name, q))
+            .is_some_and(|q| !super::search::matches(display_name(&info.name), q))
         {
             continue;
         }
@@ -636,7 +678,7 @@ fn item(
         });
     }
     if resp.hovered() && !resp.dragged() {
-        resp.on_hover_text_at_pointer(name);
+        resp.on_hover_text_at_pointer(display_name(name));
     }
 }
 
@@ -717,7 +759,7 @@ fn paint_label(ui: &Ui, v: &ItemsView, info: &ItemInfo, rect: Rect, grid: bool) 
     // Estimation du nombre de caractères qui tiennent, pour garder l'extension.
     let per_line = (rect.width() / (font.size * 0.6)).floor().max(4.0) as usize;
     let lines = if grid { 2 } else { 1 };
-    let text = ellipsize_middle(&info.name, per_line * lines);
+    let text = ellipsize_middle(display_name(&info.name), per_line * lines);
     let mut job = LayoutJob::simple(text, font, color, rect.width());
     job.wrap = TextWrapping {
         max_width: rect.width(),
@@ -978,5 +1020,37 @@ mod tests {
         assert!((m.cell.x * 4.0 - 320.0).abs() < 0.01);
         // Très étroit : une colonne.
         assert_eq!(grid_metrics(50.0, 48.0).columns, 1);
+    }
+
+    #[test]
+    fn system_items_are_named_and_protected() {
+        let bin = tidy_core::system_items::ALL[0];
+        assert_ne!(display_name(bin.id), bin.id);
+        assert_eq!(display_name("Rapport.pdf"), "Rapport.pdf");
+        assert!(system_item_info(bin).is_dir);
+        let b = BoxId::new();
+        let trash = Action::AskTrash {
+            b,
+            names: vec!["a.txt".into(), bin.id.into()],
+        };
+        assert_eq!(touches_system_item(&trash), Some(b));
+        let rename = Action::StartRename {
+            b,
+            name: bin.id.into(),
+        };
+        assert_eq!(touches_system_item(&rename), Some(b));
+        let open = Action::Open {
+            b,
+            names: vec![bin.id.into()],
+        };
+        assert_eq!(touches_system_item(&open), None);
+        let normal = Action::AskTrash {
+            b,
+            names: vec!["a.txt".into()],
+        };
+        assert_eq!(touches_system_item(&normal), None);
+        let dir = ItemDir::plain(PathBuf::from("/bureau"));
+        assert_eq!(dir.join(bin.id), PathBuf::from(bin.id));
+        assert_eq!(dir.join("a.txt"), PathBuf::from("/bureau/a.txt"));
     }
 }

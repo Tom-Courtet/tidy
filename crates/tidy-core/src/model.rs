@@ -289,6 +289,10 @@ pub struct DeskBox {
     /// Champ de recherche dans la barre de titre (filtre les éléments affichés).
     #[serde(default)]
     pub search_in_title: bool,
+    /// Cachée : pas de fenêtre sur le bureau, mais ses éléments restent rangés (et
+    /// masqués du bureau du système). Son raccourci la montre un moment.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 impl DeskBox {
@@ -310,6 +314,7 @@ impl DeskBox {
             hotkey: None,
             frozen: false,
             search_in_title: false,
+            hidden: false,
         }
     }
 
@@ -439,6 +444,11 @@ pub enum DesktopCommand {
     ForgetOtherScreenSets {
         screens: Vec<Screen>,
     },
+    /// Cache ou montre une boîte (sur l'état à jour).
+    SetBoxHidden {
+        id: BoxId,
+        hidden: bool,
+    },
 }
 
 impl DesktopState {
@@ -484,6 +494,11 @@ impl DesktopState {
                 }
             }
             DesktopCommand::RemoveWidget { id } => self.widgets.retain(|w| w.id != id),
+            DesktopCommand::SetBoxHidden { id, hidden } => {
+                if let Some(b) = self.find_box_mut(id) {
+                    b.hidden = hidden;
+                }
+            }
             DesktopCommand::SetWidgetFlags {
                 id,
                 frozen,
@@ -694,5 +709,23 @@ mod tests {
         assert!(state.boxes.is_empty());
         assert!(state.rules.is_empty());
         assert!(state.loose.contains_key(&ItemRef("Rapport.pdf".into())));
+    }
+
+    #[test]
+    fn a_box_can_be_hidden_and_shown() {
+        let mut state = DesktopState::default();
+        let b = DeskBox::new("Fourre-tout");
+        let id = b.id;
+        state.boxes.push(b);
+        state.apply(DesktopCommand::SetBoxHidden { id, hidden: true });
+        assert!(state.boxes[0].hidden);
+        // Un ancien fichier sans le champ se relit : boîte visible.
+        let json = serde_json::to_string(&state.boxes[0])
+            .unwrap()
+            .replace(",\"hidden\":true", "");
+        let back: DeskBox = serde_json::from_str(&json).unwrap();
+        assert!(!back.hidden);
+        state.apply(DesktopCommand::SetBoxHidden { id, hidden: false });
+        assert!(!state.boxes[0].hidden);
     }
 }

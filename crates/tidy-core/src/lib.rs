@@ -20,6 +20,7 @@ pub mod settings;
 pub mod snap;
 pub mod sort;
 pub mod store;
+pub mod system_items;
 
 pub use model::{BoxId, DeskBox, DesktopCommand, DesktopState};
 pub use settings::Settings;

@@ -209,6 +209,14 @@ fn box_card(m: &mut Manager, ui: &mut egui::Ui, id: BoxId) {
                 ui.label(RichText::new(icons::PORTAL).color(theme::ACCENT_2));
             }
             name_field(m, ui, &b);
+            if b.hidden {
+                ui.label(widgets::dim(format!(
+                    "{}  {}",
+                    icons::EYE_OFF,
+                    t!("system_items.hidden_badge")
+                )))
+                .on_hover_text(t!("system_items.hidden_box_hint"));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let chevron = if open {
                     icons::CHEVRON_UP
@@ -354,6 +362,14 @@ fn details(m: &mut Manager, ui: &mut egui::Ui, b: &DeskBox) {
         t!("box_extra.menu_freeze"),
         Some(t!("box_extra.frozen_tooltip")),
         |ui| widgets::toggle(ui, &mut edited.frozen),
+    );
+    widgets::row_separator(ui);
+    widgets::setting_row(
+        ui,
+        icons::EYE_OFF,
+        t!("system_items.hidden_box"),
+        Some(t!("system_items.hidden_box_hint")),
+        |ui| widgets::toggle(ui, &mut edited.hidden),
     );
     widgets::row_separator(ui);
 

@@ -142,8 +142,17 @@ impl DesktopPlatform for WindowsPlatform {
     }
 
     fn open(&self, path: &Path) -> Result<()> {
+        let text = path.to_string_lossy();
+        // Élément système (Corbeille, Ce PC…) : son nom d'analyse `::{CLSID}`, ouvert
+        // par l'Explorateur avec le préfixe `shell:`.
+        if text.starts_with("::{") {
+            std::process::Command::new("explorer.exe")
+                .arg(format!("shell:{text}"))
+                .spawn()?;
+            return Ok(());
+        }
         let verb = wide("open");
-        let file = wide(&path.to_string_lossy());
+        let file = wide(&text);
         // SAFETY: chaînes terminées par un zéro, vivantes pendant l'appel ; pas de
         // fenêtre parente.
         let result = unsafe {

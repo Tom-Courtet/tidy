@@ -1114,3 +1114,17 @@ tray_wallpapers = "Fonds d'écran"
 tray_next_wallpaper = "Fond suivant"
 tray_manage_wallpapers = "Gérer les fonds d'écran…"
 tray_lock_vault = "Verrouiller la boîte privée"
+
+# Éléments système du bureau de Windows et boîtes cachées.
+[system_items]
+recycle_bin = "Corbeille"
+this_pc = "Ce PC"
+user_folder = "Dossier personnel"
+network = "Réseau"
+control_panel = "Panneau de configuration"
+menu_add = "Ajouter un élément système"
+locked = "Un élément système ne se renomme pas et ne va pas à la corbeille."
+menu_hide_box = "Cacher la boîte"
+hidden_box = "Boîte cachée"
+hidden_box_hint = "Elle n'apparaît plus sur le bureau, mais ses éléments restent rangés et masqués du bureau de Windows. Son raccourci la montre un moment."
+hidden_badge = "cachée"
